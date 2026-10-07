@@ -1,0 +1,15 @@
+node_modules/
+dist/
+backend/data/
+.env
+.env.*
+!.env.example
+*.log
+*.tsbuildinfo
+.DS_Store
+*.db-wal
+*.db-shm
+
+# Local agent/editor tooling state: worktrees, agent-manager config, skills.
+# Machine-local and not part of the application.
+.kilo/

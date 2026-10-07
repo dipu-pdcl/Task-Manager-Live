@@ -1,0 +1,8 @@
+{
+  "name": "PDCL Task Manager",
+  "description": "Enterprise Task and Team Management System with KPI, analytics, and audit logging.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
