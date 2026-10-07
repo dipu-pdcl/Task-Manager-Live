@@ -60,9 +60,9 @@ export default function Tasks() {
 
   useEffect(() => {
     load(filters);
-    api.get<User[]>('/users').then(setUsers).catch(() => {});
-    api.get<Team[]>('/teams').then(setTeams).catch(() => {});
-    api.get<Department[]>('/departments').then(setDepts).catch(() => {});
+    api.get<User[]>('/users').then(setUsers).catch(() => { });
+    api.get<Team[]>('/teams').then(setTeams).catch(() => { });
+    api.get<Department[]>('/departments').then(setDepts).catch(() => { });
   }, []);
 
   const onFiltersChange = (f: FilterState) => {
@@ -75,7 +75,7 @@ export default function Tasks() {
   const openCount = useMemo(() => tasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled').length, [tasks]);
 
   const newTask = canCreate && (params.get('new') === '1' || formOpen);
-  const canCreateSelfTask = canCreate && !isAdmin;
+  const canCreateSelfTask = canCreate;
 
   return (
     <div className="max-w-[1400px] mx-auto space-y-5">
