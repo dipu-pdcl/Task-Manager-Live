@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ListTodo, CircleDashed, Target, CheckCircle2, CalendarClock, Clock3, Timer,
-  CalendarDays, AlertOctagon, Activity, Trophy, TrendingUp, Gauge,
+  CalendarDays, AlertOctagon, Activity, TrendingUp, Gauge,
   Sparkles, ChevronRight
 } from 'lucide-react';
 import { api } from '../lib/api';
@@ -75,7 +75,6 @@ export default function Dashboard() {
     { label: 'Completed', value: s?.done, icon: <CheckCircle2 size={19} />, color: '#22c55e', sub: `${s?.doneToday} today` },
     { label: 'In Progress', value: s?.inProgress, icon: <Activity size={19} />, color: '#f97316', sub: `${s?.inReview} in review` },
     { label: 'Avg. Completion', value: `${s?.avgCompletionHours}h`, icon: <Timer size={19} />, color: '#a855f7', sub: 'avg hours' },
-    { label: 'My KPI Score', value: data?.kpi?.[0]?.score ?? 0, icon: <Trophy size={19} />, color: '#eab308', sub: `${data?.kpi?.[0]?.completionRate ?? 0}% completion` },
     { label: 'Blocked Tasks', value: s?.blocked, icon: <AlertOctagon size={19} />, color: '#ef4444', sub: 'awaiting unblock' },
   ];
 
@@ -94,7 +93,6 @@ export default function Dashboard() {
         <div className="flex gap-2">
           {isAdmin && (
             <>
-              <button className="btn btn-ghost btn-sm" onClick={() => navigate('/kpi')}><Trophy size={14} /> KPI</button>
               <button className="btn btn-ghost btn-sm" onClick={() => navigate('/reports')}><TrendingUp size={14} /> Reports</button>
             </>
           )}
@@ -134,8 +132,6 @@ export default function Dashboard() {
           series={[{ key: 'added', name: 'Added', color: brand }, { key: 'done', name: 'Completed', color: '#14b8a6' }]} />
         <BarChartCard title="User Performance Ranking" subtitle="Completed tasks by user" data={(data?.userPerf || []).map((u) => ({ name: u.name, done: u.done }))} xKey="name"
           series={[{ key: 'done', name: 'Completed', color: '#f97316' }]} />
-        <BarChartCard title="KPI Score Chart" subtitle="Performance scores this period" data={(data?.kpi || []).slice(0, 10).map((k) => ({ name: (k.name || 'User').split(' ')[0], score: k.score }))} xKey="name"
-          series={[{ key: 'score', name: 'KPI Score', color: '#8b5cf6' }]} />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">

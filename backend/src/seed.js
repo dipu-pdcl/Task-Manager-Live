@@ -148,7 +148,6 @@ export async function seed() {
       'Q3 customer onboarding campaign',
       'Migrate legacy billing service to new stack',
       'Design mobile app onboarding screens',
-      'Build KPI reporting module',
       'Annual security audit remediation',
       'Automate CI deployment pipeline',
       'Customer support knowledge base',
@@ -266,7 +265,7 @@ export async function seed() {
 
       const pTasks = [
         ['Core Security Audit & Token Upgrade', 'Patch authentication endpoints and rotate cryptographic secrets across servers', 'critical', superAdmin.name, superAdmin.id, 'in_progress', addDays(today(), 3), 'Urgent requirement from security team', superAdmin.id],
-        ['Q3 Financial Reconciliation & KPI', 'Compile executive balance report and compute departmental quarterly scores', 'high', admin1.name, admin1.id, 'todo', addDays(today(), 7), 'Submit to board of directors', superAdmin.id],
+        ['Q3 Financial Reconciliation', 'Compile executive balance report and compute departmental quarterly scores', 'high', admin1.name, admin1.id, 'todo', addDays(today(), 7), 'Submit to board of directors', superAdmin.id],
         ['Database Query Optimization & Indexing', 'Add composite indexes on tasks and priority_tasks tables to ensure <50ms query times', 'high', member0.name, member0.id, 'in_progress', addDays(today(), 5), 'Target 50% lower I/O latency', admin0.id],
         ['Emergency Backup Server Configuration', 'Deploy cold storage replica in disaster recovery zone', 'critical', 'External Cloud Ops Team', null, 'todo', addDays(today(), 4), 'Third-party vendor contract active', superAdmin.id],
         ['Mobile Responsive Layout Polish', 'Fix viewport scaling and touch target accessibility on priority task views', 'medium', member5.name, member5.id, 'done', addDays(today(), -1), 'QA testing passed with 100% score', admin0.id],

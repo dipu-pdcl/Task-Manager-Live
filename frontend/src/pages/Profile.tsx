@@ -8,6 +8,17 @@ import { HotlineBadge } from '../components/HotlineBadge';
 import type { LiveStatusType } from '../lib/types';
 import { fmtDate, cx } from '../lib/utils';
 
+interface MyKpiResponse {
+  kpi: {
+    score: number;
+    completionRate: number;
+    avgCompletionHours: number;
+    completed: number;
+    onTime: number;
+    overdueCount: number;
+  };
+}
+
 export default function Profile() {
   const { user, refreshUser, setUser, updateLiveStatus } = useAuth();
   const toast = useToast();
@@ -15,7 +26,7 @@ export default function Profile() {
   const [pwd, setPwd] = useState({ currentPassword: '', newPassword: '', confirm: '' });
   const [saving, setSaving] = useState(false);
   const [pwdSaving, setPwdSaving] = useState(false);
-  const [kpi, setKpi] = useState<any>(null);
+  const [kpi, setKpi] = useState<MyKpiResponse['kpi'] | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [statusMsg, setStatusMsg] = useState(user?.status_message || '');
 
@@ -26,7 +37,9 @@ export default function Profile() {
     if (!user) return;
     setProfile({ name: user.name, title: user.title || '', phone: user.phone || '' });
     setStatusMsg(user.status_message || '');
-    api.get<any>('/kpi/me').then(setKpi).catch(() => { });
+    api.get<MyKpiResponse>('/kpi/me').then(res => {
+      setKpi(res.kpi);
+    }).catch(() => { });
   }, [user]);
 
   if (!user) return null;

@@ -57,13 +57,13 @@ export default function Login() {
             Manage teams, track tasks & <span className="gradient-text">drive performance</span>
           </h1>
           <p className="text-ink2 mb-8 max-w-md">
-            A modern enterprise workspace with role-based dashboards, KPI-driven insights, kanban boards,
+            A modern enterprise workspace with role-based dashboards, kanban boards,
             and real-time collaboration for admins and teams.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {[
               ['Role-based', 'RBAC dashboards'],
-              ['KPI engine', 'Performance scoring'],
+              ['Task engine', 'Work tracking'],
               ['Real-time', 'Notifications & sync'],
             ].map(([a, b]) => (
               <div key={a} className="card p-4">

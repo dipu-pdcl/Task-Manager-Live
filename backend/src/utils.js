@@ -322,3 +322,17 @@ export function checkUserAvailability(userId, dateStr = today()) {
   return { available: true };
 }
 
+export function toLocal(dt, offsetMin = 360) {
+  if (dt === null || dt === undefined || dt === '') return '';
+  const s = String(dt);
+  if (s.length <= 10) return s;
+  const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(s);
+  if (!hasTz) return s.replace('T', ' ').slice(0, 19);
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return s;
+  const bd = new Date(d.getTime() + offsetMin * 60 * 1000);
+  const p = (n) => String(n).padStart(2, '0');
+  const hasSec = /:\d{2}:\d{2}/.test(s);
+  return `${bd.getUTCFullYear()}-${p(bd.getUTCMonth() + 1)}-${p(bd.getUTCDate())} ${p(bd.getUTCHours())}:${p(bd.getUTCMinutes())}${hasSec ? ':' + p(bd.getUTCSeconds()) : ''}`;
+}
+

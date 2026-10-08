@@ -159,7 +159,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         'users.manage',
         'teams.manage',
         'departments.manage',
-        'kpi.manage',
         'leaves.approve',
         'priority_tasks.manage',
       ])

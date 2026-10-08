@@ -1,20 +1,19 @@
 import { db } from '../db.js';
 import { today, BD_OFFSET_MS } from '../utils.js';
 import { generateTaskCode } from './taskCodeService.js';
-import { getKpiRule } from './kpiEngine.js';
 
 /**
  * Daily Task service.
  *
  * Generates the configured daily task templates as real task rows assigned to
- * every member of the Daily Task group, and keeps the KPI award table in sync
+ * every member of the Daily Task group, and keeps the award table in sync
  * with completion state.
  *
  * Idempotency: a partial unique index on
  * tasks(daily_task_key, daily_task_date, daily_task_user_id) guarantees at most
  * one task per template/day/user, so re-running generation can never duplicate.
  *
- * KPI: daily_task_awards has UNIQUE(task_id, user_id). Awards are reconciled to
+ * daily_task_awards has UNIQUE(task_id, user_id). Awards are reconciled to
  * "the set of daily tasks that are currently done", which makes double counting
  * structurally impossible: a task that is reopened loses its award, and can only
  * regain it by being completed again.
@@ -29,14 +28,14 @@ const DEFAULT_DAILY_POINTS = 2;
 /** Default penalty for missed daily task */
 const DEFAULT_MISS_PENALTY = -1;
 
-/** Get the daily task completion points from KPI config. */
+/** Get the daily task completion points (default). */
 export function getDailyTaskPoints() {
-  return getKpiRule('daily_task_complete');
+  return DEFAULT_DAILY_POINTS;
 }
 
-/** Get the daily task miss penalty from KPI config. */
+/** Get the daily task miss penalty (default). */
 export function getDailyMissPenalty() {
-  return getKpiRule('daily_task_overdue');
+  return DEFAULT_MISS_PENALTY;
 }
 
 /** Get the default points for a daily task template (fallback when not specified) */
@@ -154,7 +153,7 @@ export function generateDailyTasks(dateStr = today()) {
 }
 
 /**
- * Reconcile KPI awards against completion state.
+ * Reconcile daily task awards against completion state.
  *
  * Awards are a pure function of completion state, which is what makes double
  * counting impossible:
@@ -245,7 +244,7 @@ export function reconcileDailyTaskAwards() {
     reconciling = false;
   }
   if (granted > 0 || revoked > 0 || penalised > 0) {
-    console.log(`[DailyTask] KPI awards reconciled: +${granted} granted, -${revoked} revoked, ${penalised} missed-penalty`);
+    console.log(`[DailyTask] Awards reconciled: +${granted} granted, -${revoked} revoked, ${penalised} missed-penalty`);
   }
   return { granted, revoked, penalised };
 }

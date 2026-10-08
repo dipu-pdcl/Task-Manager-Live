@@ -325,7 +325,7 @@ export default function TaskDetail() {
         {statusLocked && (
           <div className="card p-3 mt-3 text-sm text-ink2 flex items-center gap-2">
             <Lock size={14} className="shrink-0" />
-            This task is completed, so its status is locked and the KPI points it earned are protected. Only an administrator can change it.
+            This task is completed, so its status is locked. Only an administrator can change it.
           </div>
         )}
       </div>

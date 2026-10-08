@@ -5,7 +5,7 @@ import {
   ScrollText, Settings as SettingsIcon, LogOut, Bell, Search, Sun, Moon,
   Menu, X, ChevronRight, UserCircle, CalendarDays, ShieldCheck, Flame,
   MessageSquare, MessageCircle, Clock, Cpu, ShieldAlert, Info, ArrowUpRight, CheckCheck,
-  Radio,        FolderKanban, ChevronDown, FileText, CalendarCheck,
+  Radio, Trophy, FolderKanban, ChevronDown, FileText, CalendarCheck,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { useTheme } from '../lib/theme';
@@ -286,8 +286,8 @@ export function Layout() {
       { to: '/users', label: 'Users', icon: UserCog, visible: hasPermission(['users.view', 'users.manage']) },
       { to: '/teams', label: 'Teams', icon: Users, visible: hasPermission(['teams.view', 'teams.manage']) },
       { to: '/departments', label: 'Branches', icon: Building2, visible: hasPermission(['departments.view', 'departments.manage']) },
-      { to: '/kpi', label: 'KPI Management', icon: Award, visible: hasPermission(['kpi.view', 'kpi.manage']) },
       { to: '/reports', label: 'Reports', icon: BarChart3, visible: hasPermission(['reports.view', 'reports.export']) },
+      { to: '/kpi', label: 'KPI Dashboard', icon: Trophy, visible: hasPermission(['kpi.view', 'kpi.manage']) },
       { to: '/audit', label: 'Audit Logs', icon: ScrollText, visible: hasPermission('audit.view') },
       { to: '/settings', label: 'Settings', icon: SettingsIcon, visible: hasPermission(['settings.view', 'settings.manage', 'roles.manage']) },
     ].filter((i) => i.visible);

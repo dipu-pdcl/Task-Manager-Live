@@ -4,7 +4,7 @@ export const PERMISSION_MODULES = [
     name: 'Dashboard Overview',
     description: 'Main overview dashboard, productivity metrics, and activity charts',
     permissions: [
-      { id: 'dashboard.view', name: 'View Dashboard', description: 'Access dashboard overview, KPIs, and workload metrics' },
+      { id: 'dashboard.view', name: 'View Dashboard', description: 'Access dashboard overview and workload metrics' },
     ],
   },
   {
@@ -52,7 +52,7 @@ export const PERMISSION_MODULES = [
   {
     id: 'daily_task',
     name: 'Daily Task',
-    description: 'Automatically assigned daily duties, completion tracking, and KPI rewards',
+    description: 'Automatically assigned daily duties, completion tracking, and rewards',
     permissions: [
       { id: 'daily_task.view', name: 'View Daily Tasks', description: 'See the daily tasks assigned to you and their completion status' },
       { id: 'daily_task.manage', name: 'Manage Daily Tasks', description: 'Add or remove group members, enable or disable daily tasks, rename them, and monitor completion' },
@@ -86,21 +86,21 @@ export const PERMISSION_MODULES = [
     ],
   },
   {
-    id: 'kpi',
-    name: 'KPI & Performance',
-    description: 'Employee KPI scoring, leaderboards, and metrics',
-    permissions: [
-      { id: 'kpi.view', name: 'View KPI Leaderboard', description: 'View staff performance rankings and metrics' },
-      { id: 'kpi.manage', name: 'Manage KPI Rules', description: 'Configure KPI formulas, targets, and scoring weights' },
-    ],
-  },
-  {
     id: 'reports',
     name: 'Reports & Analytics',
     description: 'Operational analytics, charts, and report exports',
     permissions: [
       { id: 'reports.view', name: 'View Reports', description: 'Access operational reports and analytical charts' },
       { id: 'reports.export', name: 'Export Reports', description: 'Export Excel, CSV, and PDF reports' },
+    ],
+  },
+  {
+    id: 'kpi',
+    name: 'KPI & Performance',
+    description: 'KPI scoring rules, leaderboards, and performance metrics',
+    permissions: [
+      { id: 'kpi.view', name: 'View KPI', description: 'View KPI leaderboards and performance metrics' },
+      { id: 'kpi.manage', name: 'Manage KPI Rules', description: 'Configure KPI formulas, points, and scoring weights' },
     ],
   },
   {
@@ -261,7 +261,7 @@ export const DEFAULT_ROLE_GROUPS = [
   {
     slug: 'it_asst',
     name: 'IT Asst.',
-    description: 'View tasks, update task status and comment, view live status, apply for leave, and view own profile and own KPI.',
+    description: 'View tasks, update task status and comment, view live status, apply for leave, and view own profile.',
     color: '#0d9488',
     is_system: 1,
     permissions: [
@@ -273,9 +273,7 @@ export const DEFAULT_ROLE_GROUPS = [
       // leaves.view is self-scoped (own history and quota balances) and is
       // needed to render the leave application form.
       'leaves.view', 'leaves.apply',
-      // Own profile (/auth/me, /users/me/profile) and own KPI (/kpi/me) are
-      // auth-only, so they need no permission. kpi.view is intentionally NOT
-      // granted because it would expose the whole-staff leaderboard.
+      // Own profile (/auth/me, /users/me/profile) is auth-only, so it needs no permission.
       // documents.* is intentionally NOT granted: DMS was previously reachable
       // by anyone holding tasks.view, but the role is specified as "only the
       // functions listed" and DMS is not among them. Grant documents.view

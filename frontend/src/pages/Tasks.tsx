@@ -60,9 +60,9 @@ export default function Tasks() {
 
   useEffect(() => {
     load(filters);
-    api.get<User[]>('/users').then(setUsers).catch(() => { });
-    api.get<Team[]>('/teams').then(setTeams).catch(() => { });
-    api.get<Department[]>('/departments').then(setDepts).catch(() => { });
+    api.get<User[]>('/users').then(setUsers).catch(() => {});
+    api.get<Team[]>('/teams').then(setTeams).catch(() => {});
+    api.get<Department[]>('/departments').then(setDepts).catch(() => {});
   }, []);
 
   const onFiltersChange = (f: FilterState) => {

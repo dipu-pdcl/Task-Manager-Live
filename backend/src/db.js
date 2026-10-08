@@ -258,18 +258,30 @@ export function ensureSchema(handle = db) {
     const kpiDefaults = [
       // Self Task
       { rule_key: 'self_task', rule_name: 'Self Task Completion', rule_category: 'task', points: 3, enabled: 1, description: 'Points awarded when a user completes a self-created task' },
-      // Create Task - Creator
-      { rule_key: 'create_task', rule_name: 'Create Task Completion (Creator)', rule_category: 'task', points: 3, enabled: 1, description: 'Points awarded to the task creator when they complete the task' },
-      // Create Task - Assignee
-      { rule_key: 'assignee_task', rule_name: 'Assignee Task Completion', rule_category: 'task', points: 3, enabled: 1, description: 'Points awarded to an assigned user when they complete their assigned work' },
+      // Task Completion - Creator
+      { rule_key: 'create_task', rule_name: 'Task Completion (Creator)', rule_category: 'task', points: 3, enabled: 1, description: 'Points awarded to the task creator when they complete the task' },
+      // Task Completion - Assignee
+      { rule_key: 'assignee_task', rule_name: 'Task Completion (Assignee)', rule_category: 'task', points: 3, enabled: 1, description: 'Points awarded to an assigned user when they complete their assigned work' },
+      // Task Creation
+      { rule_key: 'create_task_bonus', rule_name: 'Task Creation', rule_category: 'bonus', points: 1, enabled: 1, description: 'Bonus points for creating a task' },
+      // Task Assignment
+      { rule_key: 'assign_task_bonus', rule_name: 'Task Assignment', rule_category: 'bonus', points: 1, enabled: 1, description: 'Bonus points for assigning a task to another user' },
       // Overdue Task
       { rule_key: 'overdue_task', rule_name: 'Overdue Task Penalty', rule_category: 'penalty', points: -3, enabled: 1, description: 'Negative points applied when a task is not completed by its due date' },
+      // Incomplete Task Penalty
+      { rule_key: 'incomplete_task', rule_name: 'Incomplete Task Penalty', rule_category: 'penalty', points: -1, enabled: 1, description: 'Penalty for tasks left incomplete' },
       // Daily Task Completion
       { rule_key: 'daily_task_complete', rule_name: 'Daily Task Completion', rule_category: 'daily', points: 2, enabled: 1, description: 'Points awarded for completing a daily task' },
-      // Daily Task Overdue
-      { rule_key: 'daily_task_overdue', rule_name: 'Daily Task Overdue Penalty', rule_category: 'penalty', points: -1, enabled: 1, description: 'Negative points applied when a daily task is missed on a past day' },
-      // Admin Assigned Task Bonus
-      { rule_key: 'admin_bonus', rule_name: 'Admin Assigned Task Bonus', rule_category: 'bonus', points: 1, enabled: 1, description: 'Bonus point when an Admin assigns a task and the assignee completes it' },
+      // Daily Task Miss Penalty
+      { rule_key: 'daily_task_overdue', rule_name: 'Daily Task Miss Penalty', rule_category: 'penalty', points: -1, enabled: 1, description: 'Negative points applied when a daily task is missed on a past day' },
+      // Task Bonus (general completion bonus)
+      { rule_key: 'task_bonus', rule_name: 'Task Completion Bonus', rule_category: 'bonus', points: 1, enabled: 1, description: 'Bonus point when a task is completed' },
+      // Project Creation
+      { rule_key: 'create_project', rule_name: 'Project Creation', rule_category: 'project', points: 5, enabled: 1, description: 'Points awarded for creating a new project' },
+      // Project Task Completion
+      { rule_key: 'project_task_complete', rule_name: 'Project Task Completion', rule_category: 'project', points: 3, enabled: 1, description: 'Points awarded for completing a project task' },
+      // Project Overdue Penalty
+      { rule_key: 'project_overdue', rule_name: 'Project Overdue Penalty', rule_category: 'penalty', points: -3, enabled: 1, description: 'Negative points applied when a project task is not completed by its due date' },
     ];
     const ins = handle.prepare(`
       INSERT OR IGNORE INTO kpi_config (rule_key, rule_name, rule_category, points, enabled, description)
@@ -453,7 +465,7 @@ export function ensureSchema(handle = db) {
     addIndex('users', 'idx_users_live_status', 'live_status');
     addIndex('tasks', 'idx_tasks_status', 'status');
 
-    // Per-assignee completion. KPI now pays a share of each task's points per
+    // Per-assignee completion. Points now pays a share of each task's points per
     // person who personally completed it, scored from task_assignees.completed_at.
     // Older rows were only ever stamped on tasks.completed_at, so backfill the
     // recorded completer (falling back to the sole assignee) or those people
@@ -1114,6 +1126,18 @@ CREATE TABLE IF NOT EXISTS settings (
   updated_at TEXT NOT NULL DEFAULT (datetime('now','+6 hours'))
 );
 
+CREATE TABLE IF NOT EXISTS kpi_config (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  rule_key TEXT NOT NULL UNIQUE,
+  rule_name TEXT NOT NULL,
+  rule_category TEXT NOT NULL DEFAULT 'general',
+  points INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  description TEXT DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now','+6 hours')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now','+6 hours'))
+);
+
 CREATE TABLE IF NOT EXISTS holidays (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   date TEXT NOT NULL,
@@ -1139,45 +1163,9 @@ CREATE TABLE IF NOT EXISTS task_history (
       new_value TEXT DEFAULT '',
       created_at TEXT NOT NULL DEFAULT (datetime('now','+6 hours'))
     );
-
-    CREATE TABLE IF NOT EXISTS kpi_config (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      rule_key TEXT NOT NULL UNIQUE,
-      rule_name TEXT NOT NULL,
-      rule_category TEXT NOT NULL DEFAULT 'general',
-      points INTEGER NOT NULL DEFAULT 0,
-      enabled INTEGER NOT NULL DEFAULT 1,
-      description TEXT DEFAULT '',
-      created_at TEXT NOT NULL DEFAULT (datetime('now','+6 hours')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now','+6 hours'))
-    );
-
-    CREATE TABLE IF NOT EXISTS kpi_transactions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      user_name TEXT NOT NULL DEFAULT '',
-      user_email TEXT NOT NULL DEFAULT '',
-      task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
-      task_title TEXT NOT NULL DEFAULT '',
-      task_code TEXT NOT NULL DEFAULT '',
-      rule_key TEXT NOT NULL,
-      rule_name TEXT NOT NULL,
-      points INTEGER NOT NULL,
-      config_value INTEGER NOT NULL,
-      config_enabled INTEGER NOT NULL DEFAULT 1,
-      reason TEXT DEFAULT '',
-      created_at TEXT NOT NULL DEFAULT (datetime('now','+6 hours')),
-      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-      created_by_name TEXT NOT NULL DEFAULT ''
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_kpi_transactions_user ON kpi_transactions(user_id, created_at);
-    CREATE INDEX IF NOT EXISTS idx_kpi_transactions_task ON kpi_transactions(task_id);
-    CREATE INDEX IF NOT EXISTS idx_kpi_transactions_rule ON kpi_transactions(rule_key);
-    CREATE INDEX IF NOT EXISTS idx_kpi_transactions_date ON kpi_transactions(created_at);
-
-    CREATE TABLE IF NOT EXISTS priority_tasks (
-     id INTEGER PRIMARY KEY AUTOINCREMENT,
+  
+  CREATE TABLE IF NOT EXISTS priority_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
      work_title TEXT NOT NULL,
      description TEXT DEFAULT '',
      priority TEXT NOT NULL DEFAULT 'medium',

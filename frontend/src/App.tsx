@@ -15,8 +15,8 @@ const Leaves = lazy(() => import('./pages/Leaves'));
 const Users = lazy(() => import('./pages/Users'));
 const Teams = lazy(() => import('./pages/Teams'));
 const Departments = lazy(() => import('./pages/Departments'));
-const Kpi = lazy(() => import('./pages/Kpi'));
 const Reports = lazy(() => import('./pages/Reports'));
+const KpiDashboard = lazy(() => import('./pages/KpiDashboard'));
 const SettingsPage = lazy(() => import('./pages/Settings'));
 const Audit = lazy(() => import('./pages/Audit'));
 const DailyTask = lazy(() => import('./pages/DailyTask'));
@@ -76,8 +76,8 @@ export default function App() {
         <Route path="/users" element={<Protected permissions={['users.view', 'users.manage']}><Suspense fallback={<PageSuspense />}><Users /></Suspense></Protected>} />
         <Route path="/teams" element={<Protected permissions={['teams.view', 'teams.manage']}><Suspense fallback={<PageSuspense />}><Teams /></Suspense></Protected>} />
         <Route path="/departments" element={<Protected permissions={['departments.view', 'departments.manage']}><Suspense fallback={<PageSuspense />}><Departments /></Suspense></Protected>} />
-        <Route path="/kpi" element={<Protected permissions={['kpi.view', 'kpi.manage']}><Suspense fallback={<PageSuspense />}><Kpi /></Suspense></Protected>} />
         <Route path="/reports" element={<Protected permissions={['reports.view', 'reports.export']}><Suspense fallback={<PageSuspense />}><Reports /></Suspense></Protected>} />
+        <Route path="/kpi" element={<Protected permissions={['kpi.view', 'kpi.manage']}><Suspense fallback={<PageSuspense />}><KpiDashboard /></Suspense></Protected>} />
         <Route path="/audit" element={<Protected permission="audit.view"><Suspense fallback={<PageSuspense />}><Audit /></Suspense></Protected>} />
         <Route path="/daily-task" element={<Protected permissions={['daily_task.view', 'daily_task.manage']}><Suspense fallback={<PageSuspense />}><DailyTask /></Suspense></Protected>} />
         <Route path="/settings" element={<Protected permissions={['settings.view', 'settings.manage', 'roles.manage']}><Suspense fallback={<PageSuspense />}><SettingsPage /></Suspense></Protected>} />

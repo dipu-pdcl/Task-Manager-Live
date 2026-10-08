@@ -167,11 +167,7 @@ export default function TaskForm({ open, onClose, task, onSaved, selfTask }: {
           <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Saving...' : task ? 'Save Changes' : selfTask ? 'Create Self Task' : 'Create Task'}</button>
         </>
       }>
-      {selfTask && !task && (
-        <div className="mb-4 px-3 py-2 rounded-lg text-sm bg-brand/10 text-brand border border-brand/20">
-          Self tasks are personal tasks assigned to yourself. Completing one earns KPI points (1 pt within 1 hour, 2 pts after 1 hour).
-        </div>
-      )}
+      
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="md:col-span-2">
           <label className="label">Task Title *</label>

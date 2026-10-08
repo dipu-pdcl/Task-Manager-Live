@@ -7,7 +7,7 @@ import { updateProjectProgressForTask } from './projects.js';
 import { isPastDailyTask, isDailyTaskRow } from '../services/dailyTaskService.js';
 import { generateTaskCode } from '../services/taskCodeService.js';
 import { taskSearchClause } from '../filters.js';
-import { recordTaskCompletionKpi } from '../services/kpiEngine.js';
+import { calculateTaskKpi, recordKpiTransaction } from '../services/kpiEngine.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -380,9 +380,6 @@ router.post('/', requirePermission('tasks.create'), (req, res) => {
   const flags = JSON.stringify(Array.isArray(b.flags) ? b.flags : []);
   const tags = JSON.stringify(Array.isArray(b.tags) ? b.tags : []);
   const isSelfTask = b.is_self_task ? 1 : 0;
-  if (isSelfTask && isAdmin(req.user)) {
-    return res.status(403).json({ error: 'Self tasks are only available in user mode' });
-  }
   const assigneeIds = Array.isArray(b.assignees) ? [...new Set(b.assignees.map(Number).filter((n) => Number.isFinite(n)))] : [];
   const checklist = Array.isArray(b.checklist) ? b.checklist : [];
   if (isSelfTask) {
@@ -681,7 +678,7 @@ router.post('/:id/assignees/transfer', loadTask, requireTaskAssign, (req, res) =
 router.put('/:id/assignees/:userId/progress', loadTask, requireTaskWrite, (req, res) => {
   const id = Number(req.params.id);
   const userId = Number(req.params.userId);
-  // A personal completion is what earns a share of the task's KPI points, so
+  // A personal completion is what earns a share of the task's points, so
   // it is just as protected as the status itself: once the task is done, only
   // an admin may add or clear personal completions. Otherwise the lock could be
   // side-stepped and points could still be awarded on a completed task.
@@ -699,6 +696,35 @@ router.put('/:id/assignees/:userId/progress', loadTask, requireTaskWrite, (req, 
   if (p >= 100 && a.status !== 'done') {
     logHistory(id, req.user.id, 'assignee.complete', 'progress', a.progress, 100);
     notify(db.prepare('SELECT created_by FROM tasks WHERE id=?').get(id).created_by, 'task', 'Assignee completed task', `Progress for task updated`, `/tasks/${id}`);
+
+    // Record KPI for assignee completion
+    try {
+      const t = req.task;
+      const assigneeIds = db.prepare('SELECT user_id FROM task_assignees WHERE task_id = ?').all(id).map((r) => r.user_id);
+      const kpiResult = calculateTaskKpi(t, userId, assigneeIds);
+      for (const tx of kpiResult.transactions) {
+        if (tx.userId === userId) {
+          recordKpiTransaction({
+            userId: tx.userId,
+            userName: '',
+            userEmail: '',
+            taskId: id,
+            taskTitle: t.title,
+            taskCode: t.task_code,
+            ruleKey: tx.ruleKey,
+            ruleName: tx.ruleName,
+            points: tx.points,
+            configValue: tx.configValue,
+            configEnabled: tx.configEnabled,
+            reason: tx.reason,
+            createdBy: req.user.id,
+            createdByName: req.user.name,
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[KPI] Failed to record assignee completion KPI:', err);
+    }
   } else {
     logHistory(id, req.user.id, 'progress.change', 'progress', a.progress, p);
   }
@@ -722,16 +748,34 @@ router.post('/:id/status', loadTask, requireTaskWrite, (req, res) => {
     db.prepare('UPDATE tasks SET completed_at = datetime(\'now\',\'+6 hours\'), completed_by = ?, progress = 100 WHERE id = ?').run(req.user.id, id);
     // Only the person who actually flipped the status is credited with having
     // completed their share. Completing every assignee here would give each of
-    // them a personal completion, and KPI pays a share per personal completion,
+    // them a personal completion, and points are paid per personal completion,
     // so the pool would be paid out once per assignee instead of once in total.
     db.prepare(`UPDATE task_assignees SET progress = 100, status = 'done', completed_at = datetime('now','+6 hours')
       WHERE task_id = ? AND user_id = ?`).run(id, req.user.id);
     logHistory(id, req.user.id, 'task.completed', 'completed_by', '', req.user.name || String(req.user.id));
 
-    // Record KPI transaction for task completion using new KPI engine
+    // Record KPI transactions for task completion
     try {
       const assigneeIds = db.prepare('SELECT user_id FROM task_assignees WHERE task_id = ?').all(id).map((r) => r.user_id);
-      recordTaskCompletionKpi(t, req.user.id, assigneeIds);
+      const kpiResult = calculateTaskKpi(t, req.user.id, assigneeIds);
+      for (const tx of kpiResult.transactions) {
+        recordKpiTransaction({
+          userId: tx.userId,
+          userName: '',
+          userEmail: '',
+          taskId: id,
+          taskTitle: t.title,
+          taskCode: t.task_code,
+          ruleKey: tx.ruleKey,
+          ruleName: tx.ruleName,
+          points: tx.points,
+          configValue: tx.configValue,
+          configEnabled: tx.configEnabled,
+          reason: tx.reason,
+          createdBy: req.user.id,
+          createdByName: req.user.name,
+        });
+      }
     } catch (err) {
       console.error('[KPI] Failed to record task completion KPI:', err);
     }

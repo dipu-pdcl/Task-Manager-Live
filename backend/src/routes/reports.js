@@ -3,10 +3,10 @@ import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import { db } from '../db.js';
 import { requireAuth, requireAdmin, isAdmin, hasPermission, requirePermission } from '../middleware.js';
-import { dateRangeFromKey, bdNow, parseWeekendDays, WEEKDAY_SHORT } from '../utils.js';
+import { dateRangeFromKey, bdNow, parseWeekendDays, WEEKDAY_SHORT, toLocal, today } from '../utils.js';
 import { getSettings, getDifficultyById, getDifficultyPoints } from '../config.js';
-import { computeUserKpi } from './kpi.js';
 import { formatTaskCode } from '../services/taskCodeService.js';
+import { calculateAllUsersKpi, calculateUserKpi, getKpiConfig, getCompletedTasksWithKpi } from '../services/kpiEngine.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -242,34 +242,6 @@ router.get('/activity', (req, res) => {
   res.json(db.prepare(sql).all(...params));
 });
 
-router.get('/kpi', (req, res) => {
-  const admin = isAdmin(req.user);
-  const cfg = getSettings();
-  const r = dateRangeFromKey(req.query.dateKey || 'month');
-  const where = admin ? '1=1' : 'u.id = ?';
-  const params = admin ? [] : [req.user.id];
-  const list = db.prepare(`
-    SELECT u.id, u.name, u.role, u.avatar, t.name AS team_name, d.name AS department_name
-    FROM users u LEFT JOIN teams t ON t.id = u.team_id LEFT JOIN departments d ON d.id = u.department_id
-    WHERE ${where} AND u.is_active=1 ORDER BY u.name`).all(...params)
-    .map((u) => ({ ...computeUserKpi(u.id, r.start, r.end, cfg), ...u }));
-  res.json(list);
-});
-
-function toLocal(dt, offsetMin) {
-  if (dt === null || dt === undefined || dt === '') return '';
-  const s = String(dt);
-  if (s.length <= 10) return s;
-  const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(s);
-  if (!hasTz) return s.replace('T', ' ').slice(0, 19);
-  const d = new Date(s);
-  if (isNaN(d.getTime())) return s;
-  const bd = new Date(d.getTime() + 6 * 60 * 60 * 1000);
-  const p = (n) => String(n).padStart(2, '0');
-  const hasSec = /:\d{2}:\d{2}/.test(s);
-  return `${bd.getUTCFullYear()}-${p(bd.getUTCMonth() + 1)}-${p(bd.getUTCDate())} ${p(bd.getUTCHours())}:${p(bd.getUTCMinutes())}${hasSec ? ':' + p(bd.getUTCSeconds()) : ''}`;
-}
-
 const CHART_COLORS = ['#6366f1', '#22c55e', '#f97316', '#3b82f6', '#a855f7', '#eab308', '#ef4444', '#14b8a6', '#ec4899', '#64748b'];
 
 const PDF_MAX_ROWS = 400;
@@ -458,23 +430,6 @@ router.get('/export', (req, res) => {
         'Created At': toLocal(r.created_at, tzOffset),
       };
     });
-  } else if (type === 'kpi') {
-    const cfg = getSettings();
-    const r = dateRangeFromKey(req.query.dateKey || 'month', req.query.dateKey === 'custom' ? { from: req.query.from, to: req.query.to } : null);
-    const isAdminUser = isAdmin(req.user);
-    const where = isAdminUser ? '1=1' : 'u.id = ?';
-    const params = isAdminUser ? [] : [req.user.id];
-    base = db.prepare(`
-      SELECT u.id, u.name, u.role, t.name AS team_name, d.name AS department_name
-      FROM users u LEFT JOIN teams t ON t.id = u.team_id LEFT JOIN departments d ON d.id = u.department_id
-      WHERE ${where} AND u.is_active=1 ORDER BY u.name`).all(...params)
-      .map((u) => ({ ...computeUserKpi(u.id, r.start, r.end, cfg), ...u }))
-      .map((k) => ({
-        User: k.name, Role: k.role, Team: k.team_name || '', Branch: k.department_name || '',
-        Completed: k.completed, 'On-Time': k.onTime, Late: k.late, Overdue: k.overdueCount,
-        'Completion Rate': `${k.completionRate}%`, 'Avg Hours': k.avgCompletionHours,
-        Points: k.points, Bonus: k.bonus, Penalty: k.penalty, Rating: k.rating, 'Final Score': k.score,
-      }));
   } else if (type === 'activity') {
     const r = dateRangeFromKey(req.query.dateKey || '30d', req.query.dateKey === 'custom' ? { from: req.query.from, to: req.query.to } : null);
     const isAdminUser = isAdmin(req.user);
@@ -620,12 +575,6 @@ router.get('/export', (req, res) => {
           .text(String(value), x + 7, top + 22, { lineBreak: false });
       });
       doc.y = top + 60;
-    } else if (type === 'kpi' && base.length) {
-      const scores = base.map((k) => ({ name: k.User, value: k['Final Score'] }));
-      ensureSpace(doc, 280);
-      drawHBarChart(doc, 'KPI Final Scores', scores, 40, doc.y, contentW, Math.min(40 + scores.length * 16, 580));
-      doc.y += 12;
-      doc.addPage();
     }
 
     const headers = Object.keys(base[0] || {});
@@ -655,6 +604,448 @@ router.get('/export', (req, res) => {
     return;
   }
   res.status(400).json({ error: 'Unsupported format' });
+});
+
+// ========================================================================
+// KPI LEADERBOARD REPORTS
+// ========================================================================
+
+// Helper: get all KPI data with team/branch info
+function getAllKpiData(period = 'month') {
+  const range = dateRangeFromKey(period);
+  return calculateAllUsersKpi(range.start, range.end);
+}
+
+// Team Ranking
+router.get('/kpi/team-ranking', requirePermission('reports.view', 'reports.export'), (req, res) => {
+  const period = req.query.period || 'month';
+  const users = getAllKpiData(period);
+  
+  const teamMap = new Map();
+  for (const u of users) {
+    const team = u.team_name || 'Unassigned';
+    if (!teamMap.has(team)) {
+      teamMap.set(team, { name: team, points: 0, users: 0, completed: 0, onTime: 0, overdue: 0 });
+    }
+    const t = teamMap.get(team);
+    t.points += u.kpiTotal || 0;
+    t.users += 1;
+    t.completed += u.completed || 0;
+    t.onTime += u.onTime || 0;
+    t.overdue += u.overdueCount || 0;
+  }
+  
+  const teams = Array.from(teamMap.values())
+    .sort((a, b) => b.points - a.points)
+    .map((t, i) => ({ ...t, rank: i + 1, avgPoints: t.users > 0 ? Math.round(t.points / t.users) : 0 }));
+  
+  res.json({ period, teams });
+});
+
+// Branch Ranking
+router.get('/kpi/branch-ranking', requirePermission('reports.view', 'reports.export'), (req, res) => {
+  const period = req.query.period || 'month';
+  const users = getAllKpiData(period);
+  
+  const branchMap = new Map();
+  for (const u of users) {
+    const branch = u.department_name || 'Unassigned';
+    if (!branchMap.has(branch)) {
+      branchMap.set(branch, { name: branch, points: 0, users: 0, completed: 0, onTime: 0, overdue: 0 });
+    }
+    const b = branchMap.get(branch);
+    b.points += u.kpiTotal || 0;
+    b.users += 1;
+    b.completed += u.completed || 0;
+    b.onTime += u.onTime || 0;
+    b.overdue += u.overdueCount || 0;
+  }
+  
+  const branches = Array.from(branchMap.values())
+    .sort((a, b) => b.points - a.points)
+    .map((b, i) => ({ ...b, rank: i + 1, avgPoints: b.users > 0 ? Math.round(b.points / b.users) : 0 }));
+  
+  res.json({ period, branches });
+});
+
+// Employee Ranking
+router.get('/kpi/employee-ranking', requirePermission('reports.view', 'reports.export'), (req, res) => {
+  const period = req.query.period || 'month';
+  const { team, branch, search } = req.query;
+  const users = getAllKpiData(period);
+  
+  let filtered = users;
+  if (team) filtered = filtered.filter(u => u.team_name === team);
+  if (branch) filtered = filtered.filter(u => u.department_name === branch);
+  if (search) {
+    const s = String(search).toLowerCase();
+    filtered = filtered.filter(u => u.name.toLowerCase().includes(s) || u.email.toLowerCase().includes(s));
+  }
+  
+  const ranked = filtered
+    .sort((a, b) => (b.kpiTotal || 0) - (a.kpiTotal || 0))
+    .map((u, i) => ({
+      rank: i + 1,
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      role: u.role,
+      team: u.team_name || '—',
+      branch: u.department_name || '—',
+      points: u.kpiTotal || 0,
+      completed: u.completed || 0,
+      onTime: u.onTime || 0,
+      overdue: u.overdueCount || 0,
+      completionRate: u.completionRate || 0,
+      avgHours: u.avgCompletionHours || 0,
+      breakdown: u.kpiBreakdown || {}
+    }));
+  
+  res.json({ period, employees: ranked });
+});
+
+// Monthly KPI Trends
+router.get('/kpi/monthly-trends', requirePermission('reports.view', 'reports.export'), (req, res) => {
+  const year = req.query.year ? parseInt(req.query.year) : new Date().getFullYear();
+  const { team, branch, employee } = req.query;
+  
+  const start = `${year}-01-01`;
+  const end = `${year}-12-31`;
+  const taskKpi = getCompletedTasksWithKpi(start, end);
+  
+  let filtered = taskKpi;
+  if (team) filtered = filtered.filter(t => t.team === team);
+  if (branch) filtered = filtered.filter(t => t.branch === branch);
+  if (employee) filtered = filtered.filter(t => t.userId === parseInt(employee));
+  
+  const months = [];
+  for (let m = 0; m < 12; m++) {
+    const monthStart = `${year}-${String(m + 1).padStart(2, '0')}-01`;
+    const monthEnd = m === 11 ? `${year}-12-31` : `${year}-${String(m + 2).padStart(2, '0')}-01`;
+    
+    const monthTasks = filtered.filter(t => {
+      const d = t.completedAt.slice(0, 10);
+      return d >= monthStart && d <= monthEnd;
+    });
+    
+    const totalPoints = monthTasks.reduce((sum, t) => sum + t.points, 0);
+    const totalCompleted = monthTasks.length;
+    const totalOnTime = monthTasks.reduce((sum, t) => sum + t.onTime, 0);
+    const totalOverdue = monthTasks.reduce((sum, t) => sum + t.overdue, 0);
+    const totalHours = monthTasks.reduce((sum, t) => sum + t.hours, 0);
+    
+    const uniqueUsers = new Set(monthTasks.map(t => t.userId)).size;
+    
+    months.push({
+      month: m + 1,
+      monthName: new Date(year, m).toLocaleString('default', { month: 'short' }),
+      points: totalPoints,
+      totalCompleted,
+      totalOnTime,
+      totalOverdue,
+      completionRate: totalCompleted > 0 ? Math.round((totalOnTime / totalCompleted) * 100) : 0,
+      avgPointsPerUser: uniqueUsers > 0 ? Math.round(totalPoints / uniqueUsers) : 0,
+      avgHours: totalCompleted > 0 ? Math.round(totalHours / totalCompleted * 10) / 10 : 0,
+    });
+  }
+  
+  res.json({ year, months });
+});
+
+// Yearly KPI Comparison
+router.get('/kpi/yearly-comparison', requirePermission('reports.view', 'reports.export'), (req, res) => {
+  const startYear = req.query.startYear ? parseInt(req.query.startYear) : new Date().getFullYear() - 2;
+  const endYear = req.query.endYear ? parseInt(req.query.endYear) : new Date().getFullYear();
+  const { team, branch, employee } = req.query;
+  
+  const start = `${startYear}-01-01`;
+  const end = `${endYear}-12-31`;
+  const taskKpi = getCompletedTasksWithKpi(start, end);
+  
+  let filtered = taskKpi;
+  if (team) filtered = filtered.filter(t => t.team === team);
+  if (branch) filtered = filtered.filter(t => t.branch === branch);
+  if (employee) filtered = filtered.filter(t => t.userId === parseInt(employee));
+  
+  const years = [];
+  for (let y = startYear; y <= endYear; y++) {
+    const yearStart = `${y}-01-01`;
+    const yearEnd = `${y}-12-31`;
+    
+    const yearTasks = filtered.filter(t => {
+      const d = t.completedAt.slice(0, 10);
+      return d >= yearStart && d <= yearEnd;
+    });
+    
+    const totalPoints = yearTasks.reduce((sum, t) => sum + t.points, 0);
+    const totalCompleted = yearTasks.length;
+    const totalOnTime = yearTasks.reduce((sum, t) => sum + t.onTime, 0);
+    const totalOverdue = yearTasks.reduce((sum, t) => sum + t.overdue, 0);
+    const totalHours = yearTasks.reduce((sum, t) => sum + t.hours, 0);
+    
+    const uniqueUsers = new Set(yearTasks.map(t => t.userId)).size;
+    
+    years.push({
+      year: y,
+      points: totalPoints,
+      totalCompleted,
+      totalOnTime,
+      totalOverdue,
+      completionRate: totalCompleted > 0 ? Math.round((totalOnTime / totalCompleted) * 100) : 0,
+      avgPointsPerUser: uniqueUsers > 0 ? Math.round(totalPoints / uniqueUsers) : 0,
+      avgHours: totalCompleted > 0 ? Math.round(totalHours / totalCompleted * 10) / 10 : 0,
+      activeUsers: uniqueUsers,
+    });
+  }
+  
+  res.json({ startYear, endYear, years });
+});
+
+// KPI Distribution (for Pie Chart)
+router.get('/kpi/distribution', requirePermission('reports.view', 'reports.export'), (req, res) => {
+  const period = req.query.period || 'month';
+  const users = getAllKpiData(period);
+  
+  const config = getKpiConfig();
+  const categoryMap = new Map();
+  
+  for (const u of users) {
+    if (u.kpiBreakdown) {
+      for (const [ruleKey, points] of Object.entries(u.kpiBreakdown)) {
+        const rule = config[ruleKey];
+        const category = rule?.rule_category || 'other';
+        if (!categoryMap.has(category)) categoryMap.set(category, 0);
+        categoryMap.set(category, categoryMap.get(category) + Math.abs(points));
+      }
+    }
+  }
+  
+  const distribution = Array.from(categoryMap.entries())
+    .map(([category, points]) => ({ category, points }))
+    .sort((a, b) => b.points - a.points);
+  
+  const totalPoints = distribution.reduce((sum, d) => sum + d.points, 0);
+  const withPercentage = distribution.map(d => ({
+    ...d,
+    percentage: totalPoints > 0 ? Math.round((d.points / totalPoints) * 100) : 0
+  }));
+  
+  res.json({ period, distribution: withPercentage });
+});
+
+// KPI Rules Configuration (for reference)
+router.get('/kpi/config-rules', requirePermission('reports.view', 'reports.export'), (req, res) => {
+  const config = getKpiConfig();
+  const rules = Object.values(config).map(r => ({
+    rule_key: r.rule_key,
+    rule_name: r.rule_name,
+    rule_category: r.rule_category,
+    points: r.points,
+    enabled: r.enabled,
+    description: r.description
+  }));
+  res.json({ rules });
+});
+
+// Export KPI Report (CSV/Excel/PDF)
+router.get('/kpi/export', requirePermission('reports.export'), (req, res) => {
+  const { format = 'csv', type = 'employee', period = 'month', team, branch, employee, year } = req.query;
+  
+  let data, filename;
+  
+  if (type === 'employee') {
+    const users = getAllKpiData(period);
+    let filtered = users;
+    if (team) filtered = filtered.filter(u => u.team_name === team);
+    if (branch) filtered = filtered.filter(u => u.department_name === branch);
+    if (employee) filtered = filtered.filter(u => u.id === parseInt(employee));
+    
+    data = filtered
+      .sort((a, b) => (b.kpiTotal || 0) - (a.kpiTotal || 0))
+      .map((u, i) => ({
+        Rank: i + 1,
+        Name: u.name,
+        Email: u.email,
+        Role: u.role,
+        Team: u.team_name || '—',
+        Branch: u.department_name || '—',
+        Points: u.kpiTotal || 0,
+        Completed: u.completed || 0,
+        'On Time': u.onTime || 0,
+        Overdue: u.overdueCount || 0,
+        'Completion Rate %': u.completionRate || 0,
+        'Avg Hours': u.avgCompletionHours || 0
+      }));
+    filename = `kpi-employee-ranking_${period}_${today()}.${format}`;
+  } else if (type === 'team') {
+    const range = dateRangeFromKey(period);
+    const users = calculateAllUsersKpi(range.start, range.end);
+    const teamMap = new Map();
+    for (const u of users) {
+      const team = u.team_name || 'Unassigned';
+      if (!teamMap.has(team)) teamMap.set(team, { name: team, points: 0, users: 0, completed: 0, onTime: 0, overdue: 0 });
+      const t = teamMap.get(team);
+      t.points += u.kpiTotal || 0;
+      t.users += 1;
+      t.completed += u.completed || 0;
+      t.onTime += u.onTime || 0;
+      t.overdue += u.overdueCount || 0;
+    }
+    data = Array.from(teamMap.values())
+      .sort((a, b) => b.points - a.points)
+      .map((t, i) => ({
+        Rank: i + 1,
+        Team: t.name,
+        Users: t.users,
+        Points: t.points,
+        Completed: t.completed,
+        'On Time': t.onTime,
+        Overdue: t.overdue,
+        'Avg Points/User': t.users > 0 ? Math.round(t.points / t.users) : 0
+      }));
+    filename = `kpi-team-ranking_${period}_${today()}.${format}`;
+  } else if (type === 'branch') {
+    const range = dateRangeFromKey(period);
+    const users = calculateAllUsersKpi(range.start, range.end);
+    const branchMap = new Map();
+    for (const u of users) {
+      const branch = u.department_name || 'Unassigned';
+      if (!branchMap.has(branch)) branchMap.set(branch, { name: branch, points: 0, users: 0, completed: 0, onTime: 0, overdue: 0 });
+      const b = branchMap.get(branch);
+      b.points += u.kpiTotal || 0;
+      b.users += 1;
+      b.completed += u.completed || 0;
+      b.onTime += u.onTime || 0;
+      b.overdue += u.overdueCount || 0;
+    }
+    data = Array.from(branchMap.values())
+      .sort((a, b) => b.points - a.points)
+      .map((b, i) => ({
+        Rank: i + 1,
+        Branch: b.name,
+        Users: b.users,
+        Points: b.points,
+        Completed: b.completed,
+        'On Time': b.onTime,
+        Overdue: b.overdue,
+        'Avg Points/User': b.users > 0 ? Math.round(b.points / b.users) : 0
+      }));
+    filename = `kpi-branch-ranking_${period}_${today()}.${format}`;
+  } else if (type === 'monthly') {
+    const yearNum = year ? parseInt(year) : new Date().getFullYear();
+    const months = [];
+    for (let m = 0; m < 12; m++) {
+      const start = `${yearNum}-${String(m + 1).padStart(2, '0')}-01`;
+      const end = m === 11 ? `${yearNum}-12-31` : `${yearNum}-${String(m + 2).padStart(2, '0')}-01`;
+      const users = calculateAllUsersKpi(start, end);
+      const totalPoints = users.reduce((sum, u) => sum + (u.kpiTotal || 0), 0);
+      const totalCompleted = users.reduce((sum, u) => sum + (u.completed || 0), 0);
+      const totalOnTime = users.reduce((sum, u) => sum + (u.onTime || 0), 0);
+      const totalOverdue = users.reduce((sum, u) => sum + (u.overdueCount || 0), 0);
+      months.push({
+        Month: m + 1,
+        'Month Name': new Date(yearNum, m).toLocaleString('default', { month: 'short' }),
+        Points: totalPoints,
+        Completed: totalCompleted,
+        'On Time': totalOnTime,
+        Overdue: totalOverdue,
+        'Completion Rate %': totalCompleted > 0 ? Math.round((totalOnTime / totalCompleted) * 100) : 0
+      });
+    }
+    data = months;
+    filename = `kpi-monthly-trends_${yearNum}_${today()}.${format}`;
+  } else if (type === 'yearly') {
+    const startYear = year ? parseInt(year) : new Date().getFullYear() - 2;
+    const endYear = req.query.endYear ? parseInt(req.query.endYear) : new Date().getFullYear();
+    const years = [];
+    for (let y = startYear; y <= endYear; y++) {
+      const start = `${y}-01-01`;
+      const end = `${y}-12-31`;
+      const users = calculateAllUsersKpi(start, end);
+      const totalPoints = users.reduce((sum, u) => sum + (u.kpiTotal || 0), 0);
+      const totalCompleted = users.reduce((sum, u) => sum + (u.completed || 0), 0);
+      const totalOnTime = users.reduce((sum, u) => sum + (u.onTime || 0), 0);
+      const totalOverdue = users.reduce((sum, u) => sum + (u.overdueCount || 0), 0);
+      years.push({
+        Year: y,
+        Points: totalPoints,
+        Completed: totalCompleted,
+        'On Time': totalOnTime,
+        Overdue: totalOverdue,
+        'Completion Rate %': totalCompleted > 0 ? Math.round((totalOnTime / totalCompleted) * 100) : 0,
+        'Active Users': users.length
+      });
+    }
+    data = years;
+    filename = `kpi-yearly-comparison_${startYear}-${endYear}_${today()}.${format}`;
+  }
+  
+  if (!data || data.length === 0) {
+    return res.status(404).json({ error: 'No data to export' });
+  }
+  
+  if (format === 'csv') {
+    const headers = Object.keys(data[0]);
+    const csv = [
+      headers.join(','),
+      ...data.map(row => headers.map(h => `"${String(row[h] ?? '').replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+    
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send('\uFEFF' + csv);
+  } else if (format === 'xlsx') {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('KPI Report');
+    const headers = Object.keys(data[0]);
+    ws.addRow(headers);
+    ws.getRow(1).font = { bold: true };
+    for (const row of data) ws.addRow(headers.map(h => row[h] ?? ''));
+    
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return wb.xlsx.write(res).then(() => res.end()).catch((e) => {
+      if (!res.headersSent) return res.status(500).json({ error: 'Export failed' });
+      res.end();
+    });
+  } else if (format === 'pdf') {
+    // Simple PDF generation
+    const doc = new PDFDocument({ margin: 40, size: 'A4', layout: 'landscape' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    doc.pipe(res);
+    
+    doc.fontSize(18).font('Helvetica-Bold').fillColor('#1e293b').text('KPI Leaderboard Report', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(11).fillColor('#475569').text(`Type: ${type} | Period: ${period} | Generated: ${toLocal(new Date().toISOString(), 0)}`);
+    doc.moveDown();
+    
+    const headers = Object.keys(data[0]);
+    const contentW = doc.page.width - 80;
+    const rowH = 15;
+    const widths = headers.map(() => contentW / headers.length);
+    const colX = [];
+    let acc = 40;
+    for (const w of widths) { colX.push(acc); acc += w; }
+    
+    const tableRow = (cells, isHeader) => {
+      if (doc.y + rowH > doc.page.height - 40) doc.addPage();
+      const top = doc.y;
+      if (isHeader) doc.rect(40, top, contentW, rowH).fill('#eef2ff');
+      cells.forEach((v, i) => {
+        doc.font(isHeader ? 'Helvetica-Bold' : 'Helvetica').fontSize(isHeader ? 7.5 : 7);
+        doc.fillColor(isHeader ? '#1e293b' : '#334155');
+        doc.text(String(v ?? ''), colX[i] + 3, top + 4, { width: widths[i] - 6, lineBreak: false });
+      });
+      doc.y = top + rowH;
+    };
+    
+    tableRow(headers, true);
+    data.slice(0, 200).forEach(row => tableRow(headers.map(h => row[h]), false));
+    doc.end();
+  } else {
+    res.status(400).json({ error: 'Unsupported format' });
+  }
 });
 
 export default router;

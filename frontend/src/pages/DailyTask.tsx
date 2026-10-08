@@ -56,16 +56,6 @@ interface DailyComment {
   user_id: number; user_name: string; avatar?: string;
 }
 
-interface KpiRow {
-  user_id: number; name: string; email: string; role: string;
-  assigned: number; done: number; missed: number; earned: number; penalty: number; net: number;
-}
-interface KpiReport {
-  from: string; to: string;
-  summary: { assigned: number; done: number; missed: number; earned: number; penalty: number; net: number };
-  users: KpiRow[];
-}
-
 const STATUS_LABEL: Record<string, string> = { todo: 'To Do', in_progress: 'In Progress', done: 'Done' };
 
 /** First day of the month containing the given YYYY-MM-DD. */
@@ -88,7 +78,6 @@ export default function DailyTaskPage() {
   const [members, setMembers] = useState<Member[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
-  const [kpi, setKpi] = useState<KpiReport | null>(null);
   const [search, setSearch] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [selected, setSelected] = useState<number[]>([]);
@@ -126,24 +115,21 @@ export default function DailyTaskPage() {
       api.get<{ members: Member[] }>('/daily-task/members'),
       api.get<{ users: Candidate[] }>('/daily-task/candidates'),
       api.get<Overview>('/daily-task/overview', { date }),
-      api.get<KpiReport>('/daily-task/kpi', { from: monthStart(date), to: date }),
     ]);
-    const [t, m, c, o, k] = results;
+    const [t, m, c, o] = results;
     const value = <T,>(r: PromiseSettledResult<T>) => (r.status === 'fulfilled' ? r.value : null);
 
     const tv = value(t);
     const mv = value(m);
     const cv = value(c);
     const ov = value(o);
-    const kv = value(k);
 
     setTemplates(tv?.templates || []);
     setMembers(mv?.members || []);
     setCandidates(cv?.users || []);
     setOverview(ov);
-    setKpi(kv);
 
-    const failed = ['templates', 'members', 'candidates', 'overview', 'KPI']
+    const failed = ['templates', 'members', 'candidates', 'overview']
       .filter((_, i) => results[i].status === 'rejected')
       .map((label, i) => `${label}: ${(results[i] as PromiseRejectedResult).reason?.message}`)
       .join('; ');
@@ -163,7 +149,7 @@ export default function DailyTaskPage() {
     try {
       await api.post(`/tasks/${t.id}/status`, { status: t.done ? 'in_progress' : 'done' });
       await loadMine();
-      toast(t.done ? `${t.title} reopened` : `${t.title} completed (+${t.points || 2} KPI points)`);
+      toast(t.done ? `${t.title} reopened` : `${t.title} completed (+${t.points || 2} points)`);
     } catch (e: any) { toast(e.message, 'error'); }
     finally { setToggling(null); }
   };
@@ -200,20 +186,6 @@ export default function DailyTaskPage() {
     } catch (e: any) { toast(e.message, 'error'); }
     finally { setCommentBusy(false); }
   };
-
-  const exportKpi = async () => {
-    setBusy(true);
-    try {
-      const from = monthStart(date);
-      await downloadExport(
-        `/daily-task/export/kpi?from=${from}&to=${date}`,
-        `daily-task-kpi_${from}_to_${date}.csv`,
-      );
-      toast('Daily Task KPI exported');
-    } catch (e: any) { toast(e.message, 'error'); }
-    finally { setBusy(false); }
-  };
-
   const addMembers = async () => {
     if (selected.length === 0) return;
     setBusy(true);
@@ -287,17 +259,11 @@ export default function DailyTaskPage() {
             <CalendarCheck size={24} className="text-brand" /> My Daily Task
           </h1>
           <p className="text-sm text-ink2 mt-0.5">
-            Recurring duties assigned automatically every day at 12:00 AM &mdash; +2 KPI points each, &minus;1 if missed.
-            Kept separate from the main task list.
+            Recurring duties assigned automatically every day at 12:00 AM. Kept separate from the main task list.
           </p>
         </div>
         <div className="flex items-center gap-2">
           <input type="date" className="input !w-auto" value={date} onChange={(e) => setDate(e.target.value)} />
-          {canManage && (
-            <button className="btn btn-primary btn-sm" onClick={exportKpi} disabled={busy}>
-              <Download size={14} /> Export KPI Points
-            </button>
-          )}
         </div>
       </div>
 
@@ -337,7 +303,7 @@ export default function DailyTaskPage() {
               {[
                 { label: 'Tasks Today', value: mine.total, icon: CalendarCheck, color: 'text-brand' },
                 { label: 'Completed', value: mine.completed, icon: CheckCircle2, color: 'text-green-500' },
-                { label: 'KPI Points', value: mine.points, icon: Trophy, color: 'text-amber-500' },
+                { label: 'Points', value: mine.points, icon: Trophy, color: 'text-amber-500' },
                 { label: 'Max Possible', value: mine.maxPoints, icon: Trophy, color: 'text-ink3' },
               ].map((s) => (
                 <div key={s.label} className="card p-4">
@@ -362,7 +328,7 @@ export default function DailyTaskPage() {
                       <th className="px-4 py-3">Task ID</th>
                       <th className="px-4 py-3">Task</th>
                       <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3 text-right">KPI</th>
+                      <th className="px-4 py-3 text-right">Points</th>
                       <th className="px-4 py-3 text-right">Comments</th>
                       <th className="px-4 py-3 text-right">Action</th>
                     </tr>
@@ -498,71 +464,19 @@ export default function DailyTaskPage() {
                       </button>
                     </div>
                   ))}
-                </div>
+</div>
               )}
             </div>
-
-            {/* Daily Task KPI, separate from the general Total KPI */}
-            {kpi && (
-              <div className="card p-5">
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-                  <h3 className="font-bold flex items-center gap-2">
-                    <Trophy size={16} className="text-brand" /> Daily Task KPI
-                  </h3>
-                  <span className="text-[11px] text-ink3">{kpi.from} &rarr; {kpi.to}</span>
-                </div>
-                <p className="text-xs text-ink3 mb-4">
-                  {kpi.summary.done} completed (+{kpi.summary.earned}) &middot;{' '}
-                  {kpi.summary.missed} missed ({kpi.summary.penalty}) &middot;{' '}
-                  <strong className="text-ink">Net {kpi.summary.net}</strong> &middot; also included in each user&rsquo;s Total KPI
-                </p>
-                {kpi.users.length === 0 ? (
-                  <EmptyState icon={<Users size={24} />} title="No group members to report on" />
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-left text-xs text-ink3 uppercase tracking-wider border-b border-line">
-                          <th className="px-3 py-2.5">User</th>
-                          <th className="px-3 py-2.5 text-center">Assigned</th>
-                          <th className="px-3 py-2.5 text-center">Done</th>
-                          <th className="px-3 py-2.5 text-center">Missed</th>
-                          <th className="px-3 py-2.5 text-right">Earned</th>
-                          <th className="px-3 py-2.5 text-right">Penalty</th>
-                          <th className="px-3 py-2.5 text-right">Net Daily KPI</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {kpi.users.map((u) => (
-                          <tr key={u.user_id} className="border-b border-line last:border-0">
-                            <td className="px-3 py-2.5">
-                              <div className="font-semibold">{u.name}</div>
-                              <div className="text-[11px] text-ink3">{u.email}</div>
-                            </td>
-                            <td className="px-3 py-2.5 text-center tabular-nums text-ink2">{u.assigned}</td>
-                            <td className="px-3 py-2.5 text-center tabular-nums font-bold text-green-500">{u.done}</td>
-                            <td className="px-3 py-2.5 text-center tabular-nums font-bold text-red-500">{u.missed}</td>
-                            <td className="px-3 py-2.5 text-right tabular-nums text-green-600">+{u.earned}</td>
-                            <td className="px-3 py-2.5 text-right tabular-nums text-red-500">{u.penalty}</td>
-                            <td className="px-3 py-2.5 text-right tabular-nums font-bold">{u.net}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* Monitoring */}
             {overview && (
               <div className="card p-5">
                 <h3 className="font-bold flex items-center gap-2 mb-1">
-                  <Trophy size={16} className="text-brand" /> Completion &amp; KPI for {overview.date}
+                  <Trophy size={16} className="text-brand" /> Completion for {overview.date}
                 </h3>
                 <p className="text-xs text-ink3 mb-4">
                   {overview.summary.done} completed &middot; {overview.summary.missed} missed &middot;{' '}
-                  {overview.summary.points} KPI points awarded
+                  {overview.summary.points} points awarded
                 </p>
                 {overview.users.length === 0 ? (
                   <EmptyState icon={<Users size={24} />} title="No group members to report on" />
@@ -575,7 +489,7 @@ export default function DailyTaskPage() {
                           <th className="px-3 py-2.5 text-center">Done</th>
                           <th className="px-3 py-2.5 text-center">Pending</th>
                           <th className="px-3 py-2.5 text-center">Missed</th>
-                          <th className="px-3 py-2.5 text-right">KPI Points</th>
+                          <th className="px-3 py-2.5 text-right">Points</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -595,12 +509,13 @@ export default function DailyTaskPage() {
                           </tr>
                         ))}
                       </tbody>
-                    </table>
+</table>
                   </div>
                 )}
               </div>
-            )}
+          )}
           </>
+
         )
       )}
 
@@ -713,7 +628,7 @@ export default function DailyTaskPage() {
             />
           </div>
           <div>
-            <label className="label">KPI Points</label>
+            <label className="label">Points</label>
             <input
               type="number" min={0} max={100} className="input"
               value={newPoints}
@@ -740,7 +655,7 @@ export default function DailyTaskPage() {
               <input className="input" value={editName} onChange={(e) => setEditName(e.target.value)} />
             </div>
             <div>
-              <label className="label">KPI Points</label>
+<label className="label">Points</label>
               <input
                 type="number" min={0} max={100} className="input"
                 value={editPoints}
@@ -774,3 +689,4 @@ export default function DailyTaskPage() {
     </div>
   );
 }
+

@@ -31,12 +31,13 @@ import {
    FolderSymlink
 } from 'lucide-react';
 import { api, downloadExport } from '../lib/api';
-import type { Settings, KpiConfigRule } from '../lib/types';
+import type { Settings } from '../lib/types';
 import { useSetSettings } from '../lib/settings';
 import { useAuth } from '../lib/auth';
 import { Switch, Modal, useToast, ConfirmModal, Skeleton } from '../components/ui';
 import { cx, bdDateKey, fmtDateTime } from '../lib/utils';
 import RolePermissionManager from '../components/RolePermissionManager';
+import KpiConfig from '../components/KpiConfig';
 
 interface BackupStats {
   totalUsers: number;
@@ -86,25 +87,6 @@ export default function SettingsPage() {
   const [holidayName, setHolidayName] = useState('');
   const [delHoliday, setDelHoliday] = useState<string | null>(null);
 
-  // KPI Config state
-  const [kpiConfig, setKpiConfig] = useState<KpiConfigRule[]>([]);
-  const [kpiConfigModal, setKpiConfigModal] = useState(false);
-  const [editingRuleKey, setEditingRuleKey] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ points: 0, enabled: true, description: '' });
-
-  const loadKpiConfig = useCallback(async () => {
-    try {
-      const res = await api.get<{ rules: KpiConfigRule[] }>('/kpi/config');
-      setKpiConfig(res.rules || []);
-    } catch (e: any) {
-      console.error('Failed to load KPI config:', e);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadKpiConfig();
-  }, [loadKpiConfig]);
-
   // Backup & Restore state
   const [systemStats, setSystemStats] = useState<BackupStats | null>(null);
   const [backingUp, setBackingUp] = useState(false);
@@ -125,7 +107,8 @@ export default function SettingsPage() {
   const toast = useToast();
   const { user: me, isSuper, hasPermission } = useAuth();
   const canManageRoles = isSuper || hasPermission('roles.manage');
-  const [currentTab, setCurrentTab] = useState<'roles' | 'general' | 'backup' | 'reset'>('general');
+  const canManageKpi = isSuper || hasPermission('kpi.manage');
+  const [currentTab, setCurrentTab] = useState<'roles' | 'general' | 'backup' | 'reset' | 'kpi'>('general');
 
   useEffect(() => {
     if (canManageRoles) {
@@ -146,7 +129,6 @@ export default function SettingsPage() {
   useEffect(() => {
     api.get<Settings>('/settings').then(setSettings).catch(() => {});
     api.get<{ id: number; date: string; name: string }[]>('/settings/holidays').then(setHolidays).catch(() => {});
-    loadKpiConfig();
     loadStats();
   }, []);
 
@@ -168,37 +150,6 @@ export default function SettingsPage() {
     } finally {
       setSaving(false);
     }
-  };
-
-  const saveKpiConfig = async () => {
-    if (!editingRuleKey) return;
-    const { points, enabled, description } = editForm;
-    try {
-      await api.put(`/kpi/config/${editingRuleKey}`, { points, enabled, description });
-      toast('KPI rule updated');
-      setEditingRuleKey(null);
-      setEditForm({ points: 0, enabled: true, description: '' });
-      setKpiConfigModal(false);
-      loadKpiConfig();
-    } catch (e: any) {
-      toast(e.message || 'Failed to update KPI rule', 'error');
-    }
-  };
-
-  const resetKpiConfig = async () => {
-    try {
-      await api.post('/kpi/config/reset');
-      toast('KPI rules reset to defaults');
-      loadKpiConfig();
-    } catch (e: any) {
-      toast(e.message || 'Failed to reset KPI rules', 'error');
-    }
-  };
-
-  const openEditRule = (rule: KpiConfigRule) => {
-    setEditingRuleKey(rule.rule_key);
-    setEditForm({ points: rule.points, enabled: rule.enabled === 1, description: rule.description });
-    setKpiConfigModal(true);
   };
 
   const saveStatus = async () => {
@@ -364,7 +315,7 @@ export default function SettingsPage() {
           <SettingsIcon size={24} className="text-brand" /> Settings
         </h1>
         <p className="text-sm text-ink2 mt-0.5">
-          Role & permission groups, workflow statuses, priorities, KPI formula, working days, and full system backup
+          Role & permission groups, workflow statuses, priorities, working days, and full system backup
         </p>
       </div>
 
@@ -418,6 +369,20 @@ export default function SettingsPage() {
             <span>Backup & Disaster Recovery</span>
           </button>
         )}
+        {canManageKpi && (
+          <button
+            onClick={() => setCurrentTab('kpi')}
+            className={cx(
+              'px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2',
+              currentTab === 'kpi'
+                ? 'bg-brand text-white shadow-sm'
+                : 'text-ink2 hover:text-ink hover:bg-card'
+            )}
+          >
+            <Activity size={15} />
+            <span>KPI Configuration</span>
+          </button>
+        )}
         {isSuper && (
           <button
             onClick={() => setCurrentTab('reset')}
@@ -439,6 +404,7 @@ export default function SettingsPage() {
         <DataResetPanel onDone={() => { loadStats(); }} />
       )}
       {currentTab === 'roles' && canManageRoles && <RolePermissionManager />}
+      {currentTab === 'kpi' && canManageKpi && <KpiConfig />}
 
       {/* TAB 2: FULL BACKUP & RESTORE SECTION */}
       {currentTab === 'backup' && isSuper && (
@@ -452,8 +418,8 @@ export default function SettingsPage() {
             </div>
             <p className="text-xs text-ink2 mt-1 max-w-2xl">
                 Take a metadata snapshot of the entire PDCL ICT system or restore a previously downloaded backup.
-               A Full Backup captures <strong>all users and credentials</strong>, <strong>task and priority workflows</strong>,{' '}
-               <strong>leave management data and quotas</strong>, <strong>system configurations and KPI rules</strong>,{' '}
+A Full Backup captures <strong>all users and credentials</strong>, <strong>task and priority workflows</strong>,{' '}
+                <strong>leave management data and quotas</strong>, <strong>system configurations</strong>,{' '}
                <strong>all file attachments</strong>, and <strong>document metadata</strong>{' '}
                (file names, types, tags, access permissions — <em>binary document files are excluded</em> to reduce backup size;
                use the Document Files Backup or document indexer to recover file data).
@@ -780,7 +746,7 @@ export default function SettingsPage() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="font-bold">Priority Levels</h3>
-            <p className="text-xs text-ink3">Used in filtering and KPI weighting</p>
+            <p className="text-xs text-ink3">Used in filtering and task weighting</p>
           </div>
           <button
             className="btn btn-primary btn-sm"
@@ -820,76 +786,6 @@ export default function SettingsPage() {
               </button>
             </span>
           ))}
-        </div>
-      </div>
-
-      {/* KPI SETTINGS */}
-      <div className="card p-5">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="font-bold flex items-center gap-2">
-              <Activity size={16} className="text-brand" /> KPI Settings
-            </h3>
-            <p className="text-xs text-ink3">Configure all KPI points, rules, and bonuses from one place</p>
-          </div>
-          {hasPermission('kpi.manage') && (
-            <button className="btn btn-primary btn-sm" onClick={resetKpiConfig}>
-              <RotateCcw size={14} /> Reset to Defaults
-            </button>
-          )}
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-line text-left text-xs text-ink3 uppercase tracking-wider">
-                <th className="pb-2">Rule</th>
-                <th className="pb-2">Category</th>
-                <th className="pb-2 text-center">Points</th>
-                <th className="pb-2 text-center">Status</th>
-                <th className="pb-2">Description</th>
-                <th className="pb-2 text-center">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {kpiConfig.map((rule) => (
-                <tr key={rule.rule_key} className="hover:bg-card2/50">
-                  <td className="py-3 font-medium">{rule.rule_name}</td>
-                  <td className="py-3">
-                    <span className={cx('px-2 py-0.5 rounded-full text-[10px] font-medium',
-                      rule.rule_category === 'task' && 'bg-brand/15 text-brand',
-                      rule.rule_category === 'daily' && 'bg-ok/15 text-ok',
-                      rule.rule_category === 'penalty' && 'bg-bad/15 text-bad',
-                      rule.rule_category === 'bonus' && 'bg-warn/15 text-warn'
-                    )}>
-                      {rule.rule_category}
-                    </span>
-                  </td>
-                  <td className="py-3 text-center font-mono font-bold" style={{ color: rule.points >= 0 ? 'var(--ok)' : 'var(--bad)' }}>
-                    {rule.points >= 0 ? '+' : ''}{rule.points}
-                  </td>
-                  <td className="py-3 text-center">
-                    <span className={cx('px-2 py-0.5 rounded-full text-[10px] font-medium',
-                      rule.enabled === 1 ? 'bg-ok/15 text-ok' : 'bg-ink3/15 text-ink3'
-                    )}>
-                      {rule.enabled === 1 ? 'Enabled' : 'Disabled'}
-                    </span>
-                  </td>
-                  <td className="py-3 text-ink3 max-w-xs truncate">{rule.description}</td>
-                  <td className="py-3 text-center">
-                    {hasPermission('kpi.manage') && (
-                      <button
-                        className="btn btn-ghost btn-sm px-2"
-                        onClick={() => openEditRule(rule)}
-                        title="Edit"
-                      >
-                        <Pencil size={13} />
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       </div>
 
@@ -1187,55 +1083,6 @@ export default function SettingsPage() {
                 }
               />
             </div>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal
-        open={kpiConfigModal}
-        onClose={() => { setKpiConfigModal(false); setEditingRuleKey(null); setEditForm({ points: 0, enabled: true, description: '' }); }}
-        title="Edit KPI Rule"
-        footer={
-          <>
-            <button className="btn btn-ghost" onClick={() => { setKpiConfigModal(false); setEditingRuleKey(null); setEditForm({ points: 0, enabled: true, description: '' }); }}>
-              Cancel
-            </button>
-            <button className="btn btn-primary" onClick={saveKpiConfig} disabled={!editingRuleKey}>
-              <Save size={14} /> Save
-            </button>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          <p className="text-xs text-muted">
-            Changes take effect immediately for new KPI calculations. Historical KPI records
-            remain traceable with the configuration values used at the time of award.
-          </p>
-          <div>
-            <label className="label">Rule</label>
-            <input className="input" value={kpiConfig.find(r => r.rule_key === editingRuleKey)?.rule_name || ''} readOnly />
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="label">Points</label>
-              <input
-                type="number"
-                className="input"
-                value={editForm.points}
-                onChange={(e) => setEditForm({ ...editForm, points: Number(e.target.value) })}
-              />
-            </div>
-            <div>
-              <label className="label">Enabled</label>
-              <select className="input" value={String(editForm.enabled)} onChange={(e) => setEditForm({ ...editForm, enabled: e.target.value === 'true' })}>
-                <option value="true">Enabled</option>
-                <option value="false">Disabled</option>
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="label">Description</label>
-            <textarea className="input textarea" rows={3} value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} />
           </div>
         </div>
       </Modal>

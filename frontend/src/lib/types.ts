@@ -300,44 +300,6 @@ export interface KpiEntry {
   selfTaskPoints?: number;
 }
 
-export interface KpiConfigRule {
-  id: number;
-  rule_key: string;
-  rule_name: string;
-  rule_category: string;
-  points: number;
-  enabled: number;
-  description: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface KpiTransaction {
-  id: number;
-  user_id: number;
-  task_id: number | null;
-  rule_key: string;
-  rule_name: string;
-  points: number;
-  config_value: number;
-  config_enabled: number;
-  reason: string;
-  created_at: string;
-  created_by: number | null;
-  user_name?: string;
-  user_email?: string;
-  task_title?: string;
-  task_code?: string;
-  created_by_name?: string;
-}
-
-export interface KpiTransactionSummary {
-  rule_key: string;
-  rule_name: string;
-  total_points: number;
-  count: number;
-}
-
 export interface ProjectMember {
   id: number;
   user_id: number;
@@ -400,7 +362,6 @@ export interface Settings {
   taskStatuses: StatusMeta[];
   priorities: PriorityMeta[];
   difficulties: DifficultyMeta[];
-  kpiConfig: KpiConfigRule[];
   workingDays: number[];
   businessHours: { start: string; end: string };
   notificationRules: Record<string, boolean | number>;
@@ -495,7 +456,6 @@ export interface DashboardData {
   recentTasks: Task[];
   activities: { id: number; action: string; field: string; old_value: string; new_value: string; user_name?: string; created_at: string }[];
   notifications: Notification[];
-  kpi: KpiEntry[];
   calendar: { id: number; title: string; due_date: string; status: string; priority: string }[];
 }
 

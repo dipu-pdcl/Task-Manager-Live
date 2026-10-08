@@ -39,11 +39,12 @@ const ROUTES_WITHOUT_PERMISSIONS = {
   'backup.js': 'Mounted under /api/settings and guarded by requireAuth + requireAdmin. Full backup/restore is inherently an admin operation; modelled by settings.manage.',
   'dataReset.js': 'Guarded by requireRole("super_admin"). Deliberately separate from settings so it cannot be reached by holding a settings permission.',
   'liveStatus.js': 'Read routes are open to any signed-in user by design; the only privileged action (setting another user\'s status) is requireAdmin and matches live_status.manage in the catalog.',
-  'dashboard.js': 'Aggregates the caller\'s own scope. Every underlying number is already permission-filtered, and /api/kpi/me relies on the same open-by-default behaviour.',
-  'reports.js': 'KNOWN GAP. reports.view and reports.export are in the catalog but no route enforces them, so any signed-in user can read every user\'s KPI report. Worth tightening in a dedicated change.',
+  'dashboard.js': 'Aggregates the caller\'s own scope. Every underlying number is already permission-filtered.',
+  'reports.js': 'KNOWN GAP. reports.view and reports.export are in the catalog but no route enforces them, so any signed-in user can read every user\'s report. Worth tightening in a dedicated change.',
   'chat.js': 'KNOWN GAP. Channel membership is enforced in-handler, but there is no chat.* module, so "create channel" and channel admin have no catalog permission.',
   'projects.js': 'KNOWN GAP. Project CRUD is requireAdmin/requireMembership; the UI borrows tasks.* permissions. A projects.* module would be cleaner but a separate change.',
-  'kpi.js': 'KPI reporting endpoints (/api/kpi/me, /api/kpi/overview, /api/kpi/users) are read-only aggregations of task completion data. They require authentication but no specific KPI permission; access is implicitly granted to any signed-in user.',
+  'kpiConfig.js': 'KPI configuration endpoints (/api/kpi/config, /api/kpi/config/:ruleKey, /api/kpi/config/reset, /api/kpi/transactions) enforce kpi.view and kpi.manage per-route.',
+  'kpi.js': 'Re-export of KPI engine functions for backward compatibility with tests. No routes, only function exports.',
 };
 
 console.log('--- 1. catalog integrity ---');

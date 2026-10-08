@@ -72,7 +72,7 @@ function snapshotDb() {
  * - Table-by-table JSON structured dump of ALL system entities
  * - Bit-for-bit SQLite binary database
  * - All uploaded attachments
- * - System configuration, KPI settings & workflow definitions
+ * - System configuration & workflow definitions
  * - SHA-256 Checksum and comprehensive metadata
  */
 export function buildBackupManifest() {

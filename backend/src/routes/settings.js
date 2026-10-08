@@ -286,7 +286,7 @@ router.delete('/saved-filters/:id', (req, res) => {
 });
 
 router.put('/', requirePermission('settings.manage'), (req, res) => {
-  const allowed = ['taskStatuses', 'priorities', 'difficulties', 'kpi', 'workingDays', 'businessHours', 'notificationRules', 'security', 'dashboard'];
+  const allowed = ['taskStatuses', 'priorities', 'difficulties', 'workingDays', 'businessHours', 'notificationRules', 'security', 'dashboard'];
   const keys = Object.keys(req.body || {});
   for (const k of keys) {
     if (allowed.includes(k)) setSetting(k, req.body[k]);

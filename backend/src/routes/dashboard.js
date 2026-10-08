@@ -3,7 +3,6 @@ import { db } from '../db.js';
 import { requireAuth, isAdmin } from '../middleware.js';
 import { dateRangeFromKey, today, dateDaysAgo, bdNow } from '../utils.js';
 import { getSettings } from '../config.js';
-import { computeUserKpi } from './kpi.js';
 import { buildTaskFilter, scopeSql, notDailyTaskSql } from '../filters.js';
 
 const router = Router();
@@ -179,19 +178,6 @@ router.get('/', (req, res) => {
     FROM tasks t WHERE status='done' AND completed_at IS NOT NULL AND ${scope}`).get(...P()).v;
   summary.avgCompletionHours = avgH || 0;
 
-  const r = dateRangeFromKey(req.query.dateKey || '30d', req.query.dateKey === 'custom' ? { from: req.query.date_from || req.query.from, to: req.query.date_to || req.query.to } : null);
-  let kpi = null;
-  if (admin) {
-    const list = db.prepare(`
-      SELECT u.id, u.name, u.avatar FROM users u WHERE u.is_active=1 ORDER BY u.name`).all()
-      .map((u) => ({ ...computeUserKpi(u.id, r.start, r.end, cfg), ...u }))
-      .sort((a, b) => b.score - a.score);
-    kpi = list;
-  } else {
-    const me = db.prepare('SELECT id, name, avatar FROM users WHERE id = ?').get(uid);
-    kpi = [{ ...computeUserKpi(uid, r.start, r.end, cfg), ...me }];
-  }
-
   const calendar = db.prepare(`
     SELECT t.id, t.title, t.due_date, t.status, t.priority FROM tasks t
     WHERE ${scope} AND t.due_date IS NOT NULL AND t.status NOT IN ('done','cancelled')
@@ -212,7 +198,6 @@ router.get('/', (req, res) => {
     recentTasks,
     activities,
     notifications: myNotifications,
-    kpi,
     calendar,
   });
 });
