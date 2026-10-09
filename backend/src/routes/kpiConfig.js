@@ -58,7 +58,7 @@ router.put('/config/:ruleKey', requirePermission('kpi.manage'), (req, res) => {
 router.post('/config/reset', requirePermission('kpi.manage'), (req, res) => {
   const defaults = [
     { rule_key: 'self_task', rule_name: 'Self Task Completion', rule_category: 'task', points: 3, enabled: 1, description: 'Points awarded when a user completes a self-created task' },
-    { rule_key: 'create_task', rule_name: 'Task Completion (Creator)', rule_category: 'task', points: 3, enabled: 1, description: 'Points awarded to the task creator when they complete the task' },
+    { rule_key: 'create_task', rule_name: 'Create New Task', rule_category: 'task', points: 3, enabled: 1, description: 'Points awarded to whoever creates a task' },
     { rule_key: 'assignee_task', rule_name: 'Task Completion (Assignee)', rule_category: 'task', points: 3, enabled: 1, description: 'Points awarded to an assigned user when they complete their assigned work' },
     { rule_key: 'create_task_bonus', rule_name: 'Task Creation', rule_category: 'bonus', points: 1, enabled: 1, description: 'Bonus points for creating a task' },
     { rule_key: 'assign_task_bonus', rule_name: 'Task Assignment', rule_category: 'bonus', points: 1, enabled: 1, description: 'Bonus points for assigning a task to another user' },

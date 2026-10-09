@@ -113,7 +113,7 @@ export function calculateUserKpi(userId, fromDate, toDate) {
         totalPoints += points;
       }
     } else {
-      if (isCreator && assigneeCompleted) {
+      if (isCreator) {
         const points = getKpiRule('create_task');
         if (points !== 0) {
           breakdown['create_task'] = (breakdown['create_task'] || 0) + points;
@@ -143,6 +143,25 @@ export function calculateUserKpi(userId, fromDate, toDate) {
         breakdown['create_task_bonus'] = (breakdown['create_task_bonus'] || 0) + createBonus;
         totalPoints += createBonus;
       }
+    }
+  }
+
+  // Project creation points: award points for each project
+  // the user created in the date range.
+  const projects = db.prepare(`
+    SELECT p.id
+    FROM projects p
+    WHERE p.created_by = ?
+    AND p.archived = 0
+    AND date(p.created_at) >= date(?)
+    AND date(p.created_at) <= date(?)
+  `).all(userId, fromDate, toDate);
+
+  if (projects.length > 0) {
+    const projectPoints = getKpiRule('create_project');
+    if (projectPoints !== 0) {
+      breakdown['create_project'] = (breakdown['create_project'] || 0) + (projectPoints * projects.length);
+      totalPoints += projectPoints * projects.length;
     }
   }
 
@@ -262,17 +281,17 @@ export function calculateTaskKpi(task, userId, assigneeIds) {
       });
     }
   } else {
-    if (isCreator && isAssignee) {
+    if (isCreator) {
       const points = getKpiRule('create_task');
       if (points !== 0) {
         transactions.push({
           userId,
           ruleKey: 'create_task',
-          ruleName: config.create_task?.rule_name || 'Task Completion (Creator)',
+          ruleName: config.create_task?.rule_name || 'Create New Task',
           points,
           configValue: points,
           configEnabled: config.create_task?.enabled ?? true,
-          reason: 'Task completion as creator'
+          reason: 'Task creation'
         });
       }
     }
@@ -391,7 +410,7 @@ export function getCompletedTasksWithKpi(fromDate, toDate) {
       const p = getKpiRule('self_task');
       if (p !== 0) { breakdown['self_task'] = p; points += p; }
     } else {
-      if (isCreator && assigneeCompleted) {
+      if (isCreator) {
         const p = getKpiRule('create_task');
         if (p !== 0) { breakdown['create_task'] = p; points += p; }
       }

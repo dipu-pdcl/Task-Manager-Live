@@ -55,6 +55,22 @@ function canUnlockStatus(user, task) {
   return false;
 }
 
+// The creator of a task cannot mark it Done/Completed. The completion
+// option locks for the creator automatically, while they may still
+// assign users, edit task details, and update other task information.
+// Self-tasks are exempt (the creator is the assignee), and admins keep
+// an override so they can correct records.
+function isCreatorLocked(user, task) {
+  if (!user || !task) return false;
+  if (isAdmin(user)) return false;
+  if (task.is_self_task === 1) return false;
+  return task.created_by === user.id;
+}
+
+function creatorLockedMessage() {
+  return 'You created this task, so you cannot mark it as Done or Completed. Only an assigned user can complete it.';
+}
+
 function statusLockedMessage(task) {
   return 'This task is completed and its status is locked. Only an administrator can reopen, cancel or otherwise change it.';
 }
@@ -416,6 +432,11 @@ router.post('/', requirePermission('tasks.create'), (req, res) => {
   // A task can be created straight into 'done'. Stamp the completion here too,
   // otherwise those tasks sit at done with no completer and no date -- the
   // status-change handlers never run for them.
+  // The creator cannot complete a task they created (self-tasks
+  // exempt, since the creator is the assignee).
+  if (b.status === 'done' && !isSelfTask) {
+    return res.status(403).json({ error: creatorLockedMessage(), creator_locked: true });
+  }
   if (b.status === 'done') {
     db.prepare("UPDATE tasks SET completed_at = datetime('now','+6 hours'), completed_by = ?, progress = 100 WHERE id = ?").run(req.user.id, taskId);
     logHistory(taskId, req.user.id, 'task.completed', 'completed_by', '', req.user.name || String(req.user.id));
@@ -483,6 +504,11 @@ router.put('/:id', loadTask, requireTaskWrite, (req, res) => {
     && !canUnlockStatus(req.user, t);
   if (patchOverridesLock) {
     return res.status(403).json({ error: statusLockedMessage(t), locked: true });
+  }
+  // The creator cannot mark a task they created as Done/Completed.
+  // Self-tasks are exempt (the creator is the assignee). Admins may override.
+  if (patchStatus === 'done' && isCreatorLocked(req.user, t)) {
+    return res.status(403).json({ error: creatorLockedMessage(), creator_locked: true });
   }
 
   const sets = [];
@@ -686,6 +712,12 @@ router.put('/:id/assignees/:userId/progress', loadTask, requireTaskWrite, (req, 
     return res.status(403).json({ error: statusLockedMessage(req.task), locked: true });
   }
   const { progress } = req.body || {};
+  // The creator cannot complete a task they created (self-tasks
+  // exempt, since the creator is the assignee). Admins may override.
+  const requested = Math.max(0, Math.min(100, Number(progress) || 0));
+  if (requested >= 100 && isCreatorLocked(req.user, req.task)) {
+    return res.status(403).json({ error: creatorLockedMessage(), creator_locked: true });
+  }
   const a = db.prepare('SELECT * FROM task_assignees WHERE task_id = ? AND user_id = ?').get(id, userId);
   if (!a) return res.status(404).json({ error: 'Assignee not found' });
   const p = Math.max(0, Math.min(100, Number(progress) || 0));
@@ -741,10 +773,19 @@ router.post('/:id/status', loadTask, requireTaskWrite, (req, res) => {
   if (status !== t.status && !canUnlockStatus(req.user, t)) {
     return res.status(403).json({ error: statusLockedMessage(t), locked: true });
   }
+  // The creator cannot mark a task they created as Done/Completed.
+  // Self-tasks are exempt (the creator is the assignee). Admins may override.
+  if (status === 'done' && isCreatorLocked(req.user, t)) {
+    return res.status(403).json({ error: creatorLockedMessage(), creator_locked: true });
+  }
   const overridingLocked = isLockedCompleted(t) && status !== t.status;
   db.prepare('UPDATE tasks SET status = ?, updated_at = datetime(\'now\',\'+6 hours\') WHERE id = ?').run(status, id);
   db.prepare('UPDATE task_assignees SET status = ? WHERE task_id = ? AND status != \'done\'').run(status, id);
-  if (status === 'done') {
+  // Only a genuine move to done stamps a completion. Re-saving a task that
+  // is already done must not rewrite completed_at or re-credit the requester:
+  // that would backdate an on-time completion to "now" (turning it into an
+  // overdue one for KPI) and pay the completion bonus a second time.
+  if (status === 'done' && t.status !== 'done') {
     db.prepare('UPDATE tasks SET completed_at = datetime(\'now\',\'+6 hours\'), completed_by = ?, progress = 100 WHERE id = ?').run(req.user.id, id);
     // Only the person who actually flipped the status is credited with having
     // completed their share. Completing every assignee here would give each of
@@ -779,9 +820,10 @@ router.post('/:id/status', loadTask, requireTaskWrite, (req, res) => {
     } catch (err) {
       console.error('[KPI] Failed to record task completion KPI:', err);
     }
-  } else {
+  } else if (status !== 'done') {
     // Reopening clears the completer too, otherwise the task would keep
-    // claiming someone finished it.
+    // claiming someone finished it. A no-op re-save of an already-done
+    // task falls through here untouched.
     db.prepare('UPDATE tasks SET completed_at = NULL, completed_by = NULL WHERE id = ?').run(id);
     // A reopened task must also stop paying anyone who had completed it,
     // otherwise the points would stay standing against undone work.

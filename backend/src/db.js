@@ -258,8 +258,8 @@ export function ensureSchema(handle = db) {
     const kpiDefaults = [
       // Self Task
       { rule_key: 'self_task', rule_name: 'Self Task Completion', rule_category: 'task', points: 3, enabled: 1, description: 'Points awarded when a user completes a self-created task' },
-      // Task Completion - Creator
-      { rule_key: 'create_task', rule_name: 'Task Completion (Creator)', rule_category: 'task', points: 3, enabled: 1, description: 'Points awarded to the task creator when they complete the task' },
+      // Task Creation
+      { rule_key: 'create_task', rule_name: 'Create New Task', rule_category: 'task', points: 3, enabled: 1, description: 'Points awarded to whoever creates a task' },
       // Task Completion - Assignee
       { rule_key: 'assignee_task', rule_name: 'Task Completion (Assignee)', rule_category: 'task', points: 3, enabled: 1, description: 'Points awarded to an assigned user when they complete their assigned work' },
       // Task Creation

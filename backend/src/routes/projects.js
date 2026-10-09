@@ -4,6 +4,7 @@ import { requireAuth, requireAdmin, isAdmin, audit } from '../middleware.js';
 import { notify } from '../middleware.js';
 import { generateTaskCode } from '../services/taskCodeService.js';
 import { today, checkUserAvailability } from '../utils.js';
+import { getKpiConfig, getKpiRule, recordKpiTransaction } from '../services/kpiEngine.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -199,6 +200,33 @@ router.post('/', requireAdmin, (req, res) => {
   }
 
   audit(req, 'project.create', 'project', projectId, `Created project "${name}"`);
+
+  // Record KPI for project creation. The creator earns the create_project
+  // rule's points; calculateUserKpi derives those from the projects table
+  // directly, so this transaction is an audit trail, not the scorekeeper.
+  try {
+    const projectPoints = getKpiRule('create_project');
+    if (projectPoints !== 0) {
+      const config = getKpiConfig();
+      recordKpiTransaction({
+        userId,
+        userName: req.user.name || '',
+        userEmail: req.user.email || '',
+        projectId,
+        projectName: name,
+        ruleKey: 'create_project',
+        ruleName: config.create_project?.rule_name || 'Project Creation',
+        points: projectPoints,
+        configValue: projectPoints,
+        configEnabled: config.create_project?.enabled ?? true,
+        reason: 'Project creation',
+        createdBy: userId,
+        createdByName: req.user.name || '',
+      });
+    }
+  } catch (err) {
+    console.error('[KPI] Failed to record project creation KPI:', err);
+  }
 
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
   res.status(201).json({ project: enrichProject(project, userId, true) });
