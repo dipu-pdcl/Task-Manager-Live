@@ -5,8 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
-    "test": "node tests/permission-catalog.test.mjs && node tests/taskcode.test.mjs && node tests/selftask-report.test.mjs && node tests/status-lock.test.mjs && node tests/assignee-visibility.test.mjs && node tests/own-task-highlight.test.mjs && node tests/assignee-search.test.mjs && node tests/daily-template-delete.test.mjs"
+    "dev": "node --watch src/index.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

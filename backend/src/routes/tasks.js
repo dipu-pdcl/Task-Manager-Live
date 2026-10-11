@@ -4,7 +4,6 @@ import { requireAuth, requirePermission, requireAdmin, isAdmin, hasPermission, a
 import { dateRangeFromKey, today, now, checkUserAvailability } from '../utils.js';
 import { getStatusById, getPriorityById, getDifficultyById } from '../config.js';
 import { updateProjectProgressForTask } from './projects.js';
-import { isPastDailyTask, isDailyTaskRow } from '../services/dailyTaskService.js';
 import { generateTaskCode } from '../services/taskCodeService.js';
 import { taskSearchClause } from '../filters.js';
 import { calculateTaskKpi, recordKpiTransaction } from '../services/kpiEngine.js';
@@ -40,11 +39,9 @@ const requireTaskAssign = requirePermission('tasks.assign', 'tasks.edit');
 
 /**
  * A completed task is locked: once it is done, only an admin may move it again.
- * This deliberately excludes daily tasks, which keep their own existing
- * current-date/previous-date freeze in isPastDailyTask() instead.
  */
 function isLockedCompleted(t) {
-  return !!t && t.status === 'done' && !isDailyTaskRow(t);
+  return !!t && t.status === 'done';
 }
 
 // 403 unless the caller may change a completed task's status. Kept in one place
@@ -78,13 +75,6 @@ function statusLockedMessage(task) {
 function loadTask(req, res, next) {
   const t = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
   if (!t) return res.status(404).json({ error: 'Task not found' });
-  // Past daily tasks are frozen. Reads (GET /:id) do not go through loadTask,
-  // so their history and comments stay visible while every mutation is blocked.
-  if (isPastDailyTask(t)) {
-    return res.status(403).json({
-      error: `This daily task is read-only. Only the current day's daily task can be changed (task date ${t.daily_task_date}).`,
-    });
-  }
   const assignees = fetchAssignees(t.id);
   if (!canViewTask(req.user, t, assignees)) return res.status(403).json({ error: 'No access to this task' });
   req.task = t;

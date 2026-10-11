@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db.js';
-import { requireAuth, requirePermission, audit, notify } from '../middleware.js';
+import { requireAuth, requirePermission, hasPermission, audit, notify } from '../middleware.js';
 import { today } from '../utils.js';
 import {
   getTemplates,
@@ -9,7 +9,6 @@ import {
   ensureDailyTasks,
   invalidateGenerationCache,
   isPastDailyTask,
-  isDailyTaskRow,
   getDailyMissPenalty,
   templatePoints,
 } from '../services/dailyTaskService.js';
@@ -31,14 +30,14 @@ function buildOverview(dateStr, userId) {
   const readOnly = dateStr < dayStr;
 
   const rows = db.prepare(`
-    SELECT t.id, t.task_code, t.title, t.status, t.priority, t.due_date, t.completed_at,
-           t.daily_task_key, t.daily_task_date, t.daily_task_user_id AS user_id,
+    SELECT dt.id, dt.task_code, dt.title, dt.status, dt.priority, dt.due_date, dt.completed_at,
+           dt.template_key AS daily_task_key, dt.task_date AS daily_task_date, dt.user_id,
            a.points AS awarded_points,
-           (SELECT COUNT(*) FROM task_comments tc WHERE tc.task_id = t.id) AS comments_count
-    FROM tasks t
-    LEFT JOIN daily_task_awards a ON a.task_id = t.id AND a.user_id = t.daily_task_user_id
-    WHERE t.daily_task_key <> '' AND t.daily_task_date = ?
-    ORDER BY t.daily_task_user_id, (SELECT sort_order FROM daily_task_templates dt WHERE dt.key = t.daily_task_key)
+           (SELECT COUNT(*) FROM daily_task_comments dc WHERE dc.task_id = dt.id) AS comments_count
+    FROM daily_tasks dt
+    LEFT JOIN daily_task_awards a ON a.task_id = dt.id AND a.user_id = dt.user_id
+    WHERE dt.task_date = ?
+    ORDER BY dt.user_id, (SELECT sort_order FROM daily_task_templates tpl WHERE tpl.key = dt.template_key)
   `).all(dateStr);
 
   const pointsFor = (t) => (t.awarded_points != null ? t.awarded_points : templatesById.get(t.daily_task_key)?.points ?? templatePoints());
@@ -236,26 +235,20 @@ router.put('/templates/:id', canManage, (req, res) => {
     if (!enabled) {
       db.prepare(`
         DELETE FROM daily_task_awards WHERE task_id IN (
-          SELECT id FROM tasks WHERE daily_task_key = ? AND daily_task_date = ? AND status <> 'done'
+          SELECT id FROM daily_tasks WHERE template_key = ? AND task_date = ? AND status <> 'done'
         )
       `).run(t.key, today());
       db.prepare(`
-        UPDATE tasks SET status = 'cancelled', updated_at = datetime('now', '+6 hours')
-        WHERE daily_task_key = ? AND daily_task_date = ? AND status <> 'done'
+        UPDATE daily_tasks SET status = 'cancelled', updated_at = datetime('now', '+6 hours')
+        WHERE template_key = ? AND task_date = ? AND status <> 'done'
       `).run(t.key, today());
     } else {
-      // Re-enabling must restore today's tasks. The unique index means the row
+      // Re-enabling must restore today's tasks. The unique constraint means the row
       // still exists from before the disable, so generation alone will not
       // recreate it; lift the cancellation instead.
       db.prepare(`
-        UPDATE tasks SET status = 'todo', updated_at = datetime('now', '+6 hours')
-        WHERE daily_task_key = ? AND daily_task_date = ? AND status = 'cancelled'
-      `).run(t.key, today());
-      db.prepare(`
-        UPDATE task_assignees SET status = 'todo'
-        WHERE task_id IN (
-          SELECT id FROM tasks WHERE daily_task_key = ? AND daily_task_date = ? AND status = 'todo'
-        ) AND status <> 'done'
+        UPDATE daily_tasks SET status = 'todo', updated_at = datetime('now', '+6 hours')
+        WHERE template_key = ? AND task_date = ? AND status = 'cancelled'
       `).run(t.key, today());
     }
   }
@@ -278,12 +271,12 @@ router.delete('/templates/:id', canManage, (req, res) => {
   const day = today();
   db.prepare(`
     DELETE FROM daily_task_awards WHERE task_id IN (
-      SELECT id FROM tasks WHERE daily_task_key = ? AND daily_task_date = ? AND status <> 'done'
+      SELECT id FROM daily_tasks WHERE template_key = ? AND task_date = ? AND status <> 'done'
     )
   `).run(t.key, day);
   db.prepare(`
-    UPDATE tasks SET status = 'cancelled', updated_at = datetime('now', '+6 hours')
-    WHERE daily_task_key = ? AND daily_task_date = ? AND status <> 'done'
+    UPDATE daily_tasks SET status = 'cancelled', updated_at = datetime('now', '+6 hours')
+    WHERE template_key = ? AND task_date = ? AND status <> 'done'
   `).run(t.key, day);
 
   db.prepare('DELETE FROM daily_task_templates WHERE id = ?').run(id);
@@ -329,14 +322,14 @@ router.get('/overview', canManage, (req, res) => {
 // --- Comments ----------------------------------------------------------------
 
 /**
- * Comments live in the shared task_comments table, so they are covered by the
- * normal database backup. Past-day daily tasks are readable but not writable.
+ * Comments live in the dedicated daily_task_comments table.
+ * Past-day daily tasks are readable but not writable.
  */
 function loadDailyTaskForComments(req, res, next) {
-  const t = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
-  if (!t || !isDailyTaskRow(t)) return res.status(404).json({ error: 'Daily task not found' });
+  const t = db.prepare('SELECT * FROM daily_tasks WHERE id = ?').get(req.params.id);
+  if (!t) return res.status(404).json({ error: 'Daily task not found' });
   const member = db.prepare('SELECT 1 FROM daily_task_members WHERE user_id = ?').get(req.user.id);
-  const owns = t.daily_task_user_id === req.user.id;
+  const owns = t.user_id === req.user.id;
   if (!owns && !member) {
     return res.status(403).json({ error: 'You can only comment on your own daily tasks' });
   }
@@ -346,11 +339,11 @@ function loadDailyTaskForComments(req, res, next) {
 
 router.get('/:id/comments', loadDailyTaskForComments, (req, res) => {
   const rows = db.prepare(`
-    SELECT tc.id, tc.content, tc.created_at, u.id AS user_id, u.name AS user_name, u.avatar
-    FROM task_comments tc
-    JOIN users u ON u.id = tc.user_id
-    WHERE tc.task_id = ?
-    ORDER BY tc.created_at ASC, tc.id ASC
+    SELECT dc.id, dc.content, dc.created_at, u.id AS user_id, u.name AS user_name, u.avatar
+    FROM daily_task_comments dc
+    JOIN users u ON u.id = dc.user_id
+    WHERE dc.task_id = ?
+    ORDER BY dc.created_at ASC, dc.id ASC
   `).all(req.params.id);
   res.json({ ok: true, readOnly: isPastDailyTask(req.dailyTask), comments: rows });
 });
@@ -360,23 +353,94 @@ router.post('/:id/comments', loadDailyTaskForComments, (req, res) => {
   // "Previous task comments remain visible but cannot be edited."
   if (isPastDailyTask(t)) {
     return res.status(403).json({
-      error: `This daily task is read-only. Only the current day's daily task can be commented on (task date ${t.daily_task_date}).`,
+      error: `This daily task is read-only. Only the current day's daily task can be commented on (task date ${t.task_date}).`,
     });
   }
   const content = (req.body?.content || '').toString().trim();
   if (!content) return res.status(400).json({ error: 'Comment content is required' });
   if (content.length > 2000) return res.status(400).json({ error: 'Comment is too long (max 2000 characters)' });
 
-  const r = db.prepare('INSERT INTO task_comments (task_id, user_id, content, mentions) VALUES (?, ?, ?, ?)')
+  const r = db.prepare('INSERT INTO daily_task_comments (task_id, user_id, content, mentions) VALUES (?, ?, ?, ?)')
     .run(t.id, req.user.id, content, '[]');
-  db.prepare('INSERT INTO task_history (task_id, user_id, action, field, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?)')
+  db.prepare('INSERT INTO daily_task_history (task_id, user_id, action, field, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?)')
     .run(t.id, req.user.id, 'comment.add', 'comment', '', content.slice(0, 100));
 
   const row = db.prepare(`
-    SELECT tc.id, tc.content, tc.created_at, u.id AS user_id, u.name AS user_name, u.avatar
-    FROM task_comments tc JOIN users u ON u.id = tc.user_id WHERE tc.id = ?
+    SELECT dc.id, dc.content, dc.created_at, u.id AS user_id, u.name AS user_name, u.avatar
+    FROM daily_task_comments dc JOIN users u ON u.id = dc.user_id WHERE dc.id = ?
   `).get(Number(r.lastInsertRowid));
   res.status(201).json({ ok: true, readOnly: false, comment: row });
+});
+
+// --- Complete / reopen --------------------------------------------------------
+
+/**
+ * Mark the current day's daily task done, or reopen it. The assignee
+ * may change their own task; daily_task.manage may change anyone's.
+ * Past days are frozen: only the current day's task can be changed.
+ */
+router.post('/:id/status', (req, res) => {
+  const id = Number(req.params.id);
+  const t = db.prepare('SELECT * FROM daily_tasks WHERE id = ?').get(id);
+  if (!t) return res.status(404).json({ error: 'Daily task not found' });
+
+  if (isPastDailyTask(t)) {
+    return res.status(403).json({
+      error: `This daily task is read-only. Only the current day's daily task can be changed (task date ${t.task_date}).`,
+    });
+  }
+
+  const isOwner = t.user_id === req.user.id;
+  const canManage = hasPermission(req.user, 'daily_task.manage');
+  if (!isOwner && !canManage) {
+    return res.status(403).json({ error: 'You can only change your own daily tasks' });
+  }
+
+  const status = (req.body?.status || '').toString();
+  if (!['todo', 'in_progress', 'done'].includes(status)) {
+    return res.status(400).json({ error: 'status must be one of todo, in_progress, done' });
+  }
+
+  if (status === 'done') {
+    db.prepare(`
+      UPDATE daily_tasks SET status = 'done', progress = 100,
+        completed_at = datetime('now', '+6 hours'), completed_by = ?,
+        updated_at = datetime('now', '+6 hours')
+      WHERE id = ?
+    `).run(req.user.id, id);
+    db.prepare(`
+      INSERT INTO daily_task_history (task_id, user_id, action, field, old_value, new_value)
+      VALUES (?, ?, 'daily_task.complete', 'status', ?, 'done')
+    `).run(id, req.user.id, t.status);
+  } else {
+    db.prepare(`
+      UPDATE daily_tasks SET status = ?, progress = 0,
+        completed_at = NULL, completed_by = NULL,
+        updated_at = datetime('now', '+6 hours')
+      WHERE id = ?
+    `).run(status, id);
+    db.prepare(`
+      INSERT INTO daily_task_history (task_id, user_id, action, field, old_value, new_value)
+      VALUES (?, ?, 'daily_task.reopen', 'status', ?, ?)
+    `).run(id, req.user.id, t.status, status);
+  }
+
+  // Awards are a pure function of completion state, so reconciling
+  // after every change keeps them in step: completing earns the
+  // template points, reopening removes them again.
+  reconcileDailyTaskAwards();
+
+  const updated = db.prepare(`
+    SELECT dt.*,
+      (SELECT COUNT(*) FROM daily_task_comments dc WHERE dc.task_id = dt.id) AS comments_count,
+      a.points AS awarded_points
+    FROM daily_tasks dt
+    LEFT JOIN daily_task_awards a ON a.task_id = dt.id AND a.user_id = dt.user_id
+    WHERE dt.id = ?
+  `).get(id);
+
+  audit(req, 'daily_task.status', 'daily_tasks', id, `Daily task "${t.title}" status -> ${status}`);
+  res.json({ ok: true, task: updated });
 });
 
 export default router;

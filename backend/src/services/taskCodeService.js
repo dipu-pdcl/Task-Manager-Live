@@ -36,6 +36,7 @@ function tablesWithTaskCode(handle) {
     .get(name);
   if (has('tasks')) out.push('tasks');
   if (has('priority_tasks')) out.push('priority_tasks');
+  if (has('daily_tasks')) out.push('daily_tasks');
   return out;
 }
 
@@ -95,7 +96,7 @@ export function backfillTaskCodes(handle = db) {
     .get(name);
   const missingTotal = [];
 
-  for (const [table, prefix] of [['tasks', 'TSK'], ['priority_tasks', 'PTY']]) {
+  for (const [table, prefix] of [['tasks', 'TSK'], ['priority_tasks', 'PTY'], ['daily_tasks', 'TSK']]) {
     if (!has(table)) continue;
     const hasCol = handle.prepare(`PRAGMA table_info("${table}")`).all().some((c) => c.name === 'task_code');
     if (!hasCol) continue;

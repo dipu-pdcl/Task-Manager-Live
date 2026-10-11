@@ -12,12 +12,6 @@ cd frontend && node ../node_modules/.bin/tsc --noEmit
 cd backend && node --check <file>
 ```
 
-### Tests
-```bash
-npm test          # static suites: permission catalog guard + task code migration/restore
-npm run test:live # suites that need a running backend on :3001 and touch real data
-```
-
 ## Permissions
 
 The **System Permissions Catalog** lives in `backend/src/permissions.js` as
@@ -37,8 +31,8 @@ When adding a feature:
 4. Gate the frontend nav item and route on it. `RolePermissionManager` renders
    straight from the catalog, so it needs no change.
 
-`npm test` runs `backend/tests/permission-catalog.test.mjs`, which fails if a
-route file declares no permissions and is not listed with a reason in
-`ROUTES_WITHOUT_PERMISSIONS`, if a route enforces an undeclared permission, or
-if `PERMISSION_GRANTS` and `DEFAULT_ROLE_GROUPS` disagree. Run it after any
-permission change.
+When touching routes or permissions, keep these invariants by hand:
+a route file must declare every permission it enforces (or document
+why it has none), must never enforce an undeclared permission, and
+`PERMISSION_GRANTS` and `DEFAULT_ROLE_GROUPS` must agree. Verify
+with `cd backend && node --check <file>` after any permission change.

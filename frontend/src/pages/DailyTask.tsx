@@ -147,7 +147,7 @@ export default function DailyTaskPage() {
     }
     setToggling(t.id);
     try {
-      await api.post(`/tasks/${t.id}/status`, { status: t.done ? 'in_progress' : 'done' });
+      await api.post(`/daily-task/${t.id}/status`, { status: t.done ? 'in_progress' : 'done' });
       await loadMine();
       toast(t.done ? `${t.title} reopened` : `${t.title} completed (+${t.points || 2} points)`);
     } catch (e: any) { toast(e.message, 'error'); }

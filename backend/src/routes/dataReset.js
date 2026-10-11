@@ -26,6 +26,7 @@ router.use(requireAuth, requireRole('super_admin'));
  */
 const TARGETS = [
   { key: 'tasks', label: 'Tasks', tables: ['tasks'] },
+  { key: 'daily_tasks', label: 'Daily Tasks', tables: ['daily_tasks'] },
   { key: 'priority_tasks', label: 'Priority Tasks', tables: ['priority_tasks'] },
   { key: 'projects', label: 'Projects', tables: ['projects'] },
   { key: 'leave_applications', label: 'Leave Applications', tables: ['leave_applications'] },
@@ -37,7 +38,7 @@ const VALID = new Set(TARGETS.map((t) => t.key));
 const USER_OWNED_CASCADE = [
   'task_assignees', 'notifications', 'saved_filters', 'chat_reads',
   'chat_group_members', 'leave_applications', 'leave_quotas',
-  'daily_task_members', 'daily_task_awards',
+  'daily_task_members', 'daily_task_awards', 'daily_tasks',
 ];
 
 /**
@@ -48,6 +49,7 @@ const USER_OWNED_CASCADE = [
  */
 const USER_OWNED_MUST_DELETE = [
   ['task_comments', 'user_id'],
+  ['daily_task_comments', 'user_id'],
   ['task_attachments', 'user_id'],
   ['time_entries', 'user_id'],
   ['chat_messages', 'sender_id'],
@@ -62,6 +64,7 @@ const USER_OWNED_DETACH = [
   ['task_checklist', 'created_by'],
   ['approvals', 'approver_id'],
   ['projects', 'created_by'],
+  ['daily_task_history', 'user_id'],
 ];
 
 function countRows(table) {
@@ -154,9 +157,15 @@ router.post('/', (req, res) => {
     db.exec('BEGIN IMMEDIATE');
 
     if (targets.includes('tasks')) {
-      // daily_task_awards has no FK to tasks, so it must be cleared explicitly.
-      counts.daily_task_awards = (counts.daily_task_awards || 0) + db.prepare('DELETE FROM daily_task_awards').run().changes;
       counts.tasks = (counts.tasks || 0) + db.prepare('DELETE FROM tasks').run().changes;
+    }
+    if (targets.includes('daily_tasks')) {
+      // Awards reference daily tasks and have no FK, so they are
+      // cleared explicitly alongside the tasks they belong to.
+      counts.daily_task_awards = (counts.daily_task_awards || 0) + db.prepare('DELETE FROM daily_task_awards').run().changes;
+      counts.daily_task_comments = (counts.daily_task_comments || 0) + db.prepare('DELETE FROM daily_task_comments').run().changes;
+      counts.daily_task_history = (counts.daily_task_history || 0) + db.prepare('DELETE FROM daily_task_history').run().changes;
+      counts.daily_tasks = (counts.daily_tasks || 0) + db.prepare('DELETE FROM daily_tasks').run().changes;
     }
     if (targets.includes('priority_tasks')) {
       counts.priority_tasks = (counts.priority_tasks || 0) + db.prepare('DELETE FROM priority_tasks').run().changes;

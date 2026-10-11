@@ -139,6 +139,53 @@ export function ensureSchema(handle = db) {
       awarded_at TEXT NOT NULL DEFAULT (datetime('now','+6 hours')),
       UNIQUE(task_id, user_id)
     );
+
+    -- Daily tasks live in their own module, fully separate from the
+    -- main tasks table. One row per template, per day, per user.
+    CREATE TABLE IF NOT EXISTS daily_tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_code TEXT DEFAULT '',
+      template_key TEXT NOT NULL DEFAULT '',
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'todo',
+      priority TEXT DEFAULT 'medium',
+      progress INTEGER NOT NULL DEFAULT 0,
+      task_date TEXT NOT NULL,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      due_date TEXT,
+      start_date TEXT,
+      completed_at TEXT,
+      completed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now','+6 hours')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now','+6 hours')),
+      UNIQUE(template_key, task_date, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_daily_tasks_user ON daily_tasks(user_id, task_date);
+    CREATE INDEX IF NOT EXISTS idx_daily_tasks_code ON daily_tasks(task_code) WHERE task_code <> '';
+
+    CREATE TABLE IF NOT EXISTS daily_task_comments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id INTEGER NOT NULL REFERENCES daily_tasks(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      content TEXT NOT NULL,
+      mentions TEXT DEFAULT '[]',
+      created_at TEXT NOT NULL DEFAULT (datetime('now','+6 hours'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_daily_task_comments_task ON daily_task_comments(task_id);
+
+    CREATE TABLE IF NOT EXISTS daily_task_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id INTEGER NOT NULL REFERENCES daily_tasks(id) ON DELETE CASCADE,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      action TEXT NOT NULL DEFAULT '',
+      field TEXT DEFAULT '',
+      old_value TEXT DEFAULT '',
+      new_value TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now','+6 hours'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_daily_task_history_task ON daily_task_history(task_id);
   `);
 
   // Seed default role groups if missing
@@ -251,6 +298,114 @@ export function ensureSchema(handle = db) {
     handle.prepare('UPDATE daily_task_templates SET points = 2 WHERE points = 1').run();
   } catch (err) {
     console.error('Error seeding daily task templates:', err);
+  }
+
+  // One-time separation of daily tasks out of the shared tasks
+  // table. Daily tasks previously lived in `tasks` with marker
+  // columns; they now live in their own daily_tasks table with
+  // their own comments and history, so the main task module never
+  // sees them. The move is keyed on the natural key
+  // (template, date, user), which the old partial unique index
+  // already guaranteed to be unique, and is guarded by a settings
+  // flag so it runs exactly once.
+  try {
+    const separated = handle.prepare("SELECT 1 FROM settings WHERE key = 'daily_tasks_separated'").get();
+    const legacyCount = handle.prepare("SELECT COUNT(*) AS c FROM tasks WHERE daily_task_key <> ''").get();
+    if (!separated && legacyCount.c > 0) {
+      handle.exec('BEGIN IMMEDIATE');
+      try {
+        // The daily generator may already have minted rows for recent
+        // days (a previous boot can fail after generation ran), so
+        // insert with OR IGNORE on the natural key, then carry the
+        // completion state of any legacy row over to the row that
+        // replaced it, so a task finished in the old module cannot
+        // resurrect as open and earn a miss penalty.
+        handle.prepare(`
+          INSERT OR IGNORE INTO daily_tasks (
+            task_code, template_key, title, description, status, priority,
+            progress, task_date, user_id, created_by, due_date, start_date,
+            completed_at, completed_by, created_at, updated_at
+          )
+          SELECT task_code, daily_task_key, title, COALESCE(description, ''),
+                 status, COALESCE(priority, 'medium'), COALESCE(progress, 0),
+                 daily_task_date, daily_task_user_id, created_by, due_date,
+                 start_date, completed_at, completed_by, created_at, updated_at
+          FROM tasks WHERE daily_task_key <> ''
+        `).run();
+        handle.prepare(`
+          UPDATE daily_tasks
+          SET status = t.status, progress = t.progress,
+              completed_at = t.completed_at, completed_by = t.completed_by,
+              updated_at = t.updated_at
+          FROM tasks t
+          WHERE t.daily_task_key <> ''
+            AND t.status IN ('done', 'cancelled')
+            AND daily_tasks.template_key = t.daily_task_key
+            AND daily_tasks.task_date = t.daily_task_date
+            AND daily_tasks.user_id = t.daily_task_user_id
+            AND daily_tasks.status NOT IN ('done', 'cancelled')
+        `).run();
+
+        // KPI awards keep their history: re-point them at the new
+        // rows. Insert-then-delete instead of UPDATE: legacy task ids
+        // and the new daily_tasks ids share one id space, so an UPDATE
+        // can transiently collide with itself (award A: old id 100 ->
+        // new id 2500 while award B still occupies old id 2500). An
+        // award already present on the target row (re-awarded by the
+        // reconciler after a partial run) wins and the legacy
+        // duplicate is dropped, so points are never counted twice.
+        handle.prepare(`
+          INSERT INTO daily_task_awards (task_id, user_id, template_key, points, awarded_at)
+          SELECT dt.id, a.user_id, a.template_key, a.points, a.awarded_at
+          FROM daily_task_awards a
+          JOIN tasks t ON t.id = a.task_id AND t.daily_task_key <> ''
+          JOIN daily_tasks dt ON dt.template_key = t.daily_task_key
+            AND dt.task_date = t.daily_task_date
+            AND dt.user_id = t.daily_task_user_id
+          WHERE NOT EXISTS (
+            SELECT 1 FROM daily_task_awards neo
+            WHERE neo.task_id = dt.id AND neo.user_id = a.user_id
+          )
+        `).run();
+        handle.prepare(`
+          DELETE FROM daily_task_awards
+          WHERE task_id IN (SELECT id FROM tasks WHERE daily_task_key <> '')
+        `).run();
+
+        // Comments and history move with their task.
+        handle.prepare(`
+          INSERT INTO daily_task_comments (task_id, user_id, content, mentions, created_at)
+          SELECT dt.id, tc.user_id, tc.content, tc.mentions, tc.created_at
+          FROM task_comments tc
+          JOIN tasks t ON t.id = tc.task_id AND t.daily_task_key <> ''
+          JOIN daily_tasks dt ON dt.template_key = t.daily_task_key
+            AND dt.task_date = t.daily_task_date
+            AND dt.user_id = t.daily_task_user_id
+        `).run();
+        handle.prepare(`
+          INSERT INTO daily_task_history (task_id, user_id, action, field, old_value, new_value, created_at)
+          SELECT dt.id, th.user_id, th.action, th.field, th.old_value, th.new_value, th.created_at
+          FROM task_history th
+          JOIN tasks t ON t.id = th.task_id AND t.daily_task_key <> ''
+          JOIN daily_tasks dt ON dt.template_key = t.daily_task_key
+            AND dt.task_date = t.daily_task_date
+            AND dt.user_id = t.daily_task_user_id
+        `).run();
+
+        handle.prepare("DELETE FROM task_comments WHERE task_id IN (SELECT id FROM tasks WHERE daily_task_key <> '')").run();
+        handle.prepare("DELETE FROM task_history WHERE task_id IN (SELECT id FROM tasks WHERE daily_task_key <> '')").run();
+        handle.prepare("DELETE FROM tasks WHERE daily_task_key <> ''").run();
+
+        handle.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('daily_tasks_separated', '1', datetime('now','+6 hours'))").run();
+        handle.exec('COMMIT');
+        console.log(`[MIGRATE] Separated ${legacyCount.c} daily task(s) into daily_tasks`);
+      } catch (err) {
+        try { handle.exec('ROLLBACK'); } catch { /* not in a transaction */ }
+        throw err;
+      }
+    }
+  } catch (err) {
+    console.error('Error separating daily tasks:', err);
   }
 
   // Seed default KPI configuration rules (idempotent by rule_key).

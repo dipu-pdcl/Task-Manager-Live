@@ -56,6 +56,7 @@ interface MyKpiResponse {
     totalUsers: number;
     completed: number;
     onTime: number;
+    completionRate: number;
     overdue: number;
     penalties: number;
     avgHours: number;
@@ -268,7 +269,7 @@ export default function KpiDashboard() {
             <div className="card2 p-4 rounded-xl">
               <div className="text-xs text-ink3 mb-1">On Time</div>
               <div className="text-3xl font-extrabold text-green-500">{myKpi.onTime || 0}</div>
-              <div className="text-xs text-ink3 mt-1">{myKpi.completed ? `${Math.round((myKpi.onTime / myKpi.completed) * 100)}%` : '0%'}</div>
+              <div className="text-xs text-ink3 mt-1">{myKpi.completionRate ?? 0}%</div>
             </div>
             <div className="card2 p-4 rounded-xl">
               <div className="text-xs text-ink3 mb-1">Overdue</div>

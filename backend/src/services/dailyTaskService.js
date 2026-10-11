@@ -1,22 +1,26 @@
 import { db } from '../db.js';
-import { today, BD_OFFSET_MS } from '../utils.js';
+import { today, BD_OFFSET_MS, checkUserAvailability } from '../utils.js';
 import { generateTaskCode } from './taskCodeService.js';
 
 /**
  * Daily Task service.
  *
- * Generates the configured daily task templates as real task rows assigned to
- * every member of the Daily Task group, and keeps the award table in sync
- * with completion state.
+ * Generates the configured daily task templates as rows in the
+ * dedicated daily_tasks table -- fully separate from the main
+ * tasks table -- assigned to every available member of the
+ * Daily Task group, and keeps the award table in sync with
+ * completion state. Members on a weekend day or approved
+ * leave are skipped for that day.
  *
- * Idempotency: a partial unique index on
- * tasks(daily_task_key, daily_task_date, daily_task_user_id) guarantees at most
- * one task per template/day/user, so re-running generation can never duplicate.
+ * Idempotency: UNIQUE(template_key, task_date, user_id) on
+ * daily_tasks guarantees at most one task per template/day/user,
+ * so re-running generation can never duplicate.
  *
- * daily_task_awards has UNIQUE(task_id, user_id). Awards are reconciled to
- * "the set of daily tasks that are currently done", which makes double counting
- * structurally impossible: a task that is reopened loses its award, and can only
- * regain it by being completed again.
+ * daily_task_awards has UNIQUE(task_id, user_id). Awards are
+ * reconciled to "the set of daily tasks that are currently
+ * done", which makes double counting structurally impossible: a
+ * task that is reopened loses its award, and can only regain it
+ * by being completed again.
  */
 
 let generating = false;
@@ -43,17 +47,13 @@ export function templatePoints(points) {
   return points == null || points === '' ? getDailyTaskPoints() : points;
 }
 
-export function isDailyTaskRow(t) {
-  return !!(t && t.daily_task_key && t.daily_task_key !== '');
-}
-
 /**
- * A daily task is frozen once its date has passed: only the current day's task
- * may be edited. Everything else about it (status, fields, comments) is
- * read-only from midnight onwards.
+ * A daily task is frozen once its date has passed: only the current
+ * day's task may be edited. Everything else about it (status, fields,
+ * comments) is read-only from midnight onwards.
  */
 export function isPastDailyTask(t) {
-  return isDailyTaskRow(t) && !!t.daily_task_date && t.daily_task_date < today();
+  return !!t && !!t.task_date && t.task_date < today();
 }
 
 export function getTemplates() {
@@ -86,42 +86,42 @@ export function generateDailyTasks(dateStr = today()) {
   if (generating) return { skipped: true, reason: 'already running' };
   generating = true;
   let created = 0;
+  let skipped = 0;
   try {
     const templates = db.prepare(`
       SELECT key, name, description, points FROM daily_task_templates
       WHERE enabled = 1 ORDER BY sort_order, id
     `).all();
     const members = db.prepare(`
-      SELECT m.user_id, u.name, u.team_id, u.department_id
+      SELECT m.user_id, u.name
       FROM daily_task_members m
       JOIN users u ON u.id = m.user_id
       WHERE u.is_active = 1
     `).all();
 
+    // Members do not receive daily tasks on their weekend days or
+    // while an approved leave covers the day, matching the rule that
+    // blocks assigning regular tasks to unavailable users.
+    const activeMembers = members.filter((m) => checkUserAvailability(m.user_id, dateStr).available);
+    skipped = members.length - activeMembers.length;
+
     const insert = db.prepare(`
-      INSERT OR IGNORE INTO tasks (
-        title, description, status, priority, difficulty, task_type, flags, tags,
-        estimated_hours, due_date, start_date, created_by, team_id, department_id,
-        progress, is_recurring, recurring_rule, project_id, task_code,
-        daily_task_key, daily_task_date, daily_task_user_id
-      ) VALUES (?, ?, 'todo', 'medium', 'medium', 'task', '[]', '["daily"]',
-        0, ?, ?, 1, ?, ?, 0, 1, 'daily', NULL, ?, ?, ?, ?)
-    `);
-    const addAssignee = db.prepare(`
-      INSERT OR IGNORE INTO task_assignees (task_id, user_id, progress, status)
-      VALUES (?, ?, 0, 'todo')
+      INSERT OR IGNORE INTO daily_tasks (
+        title, description, status, priority, progress, task_date,
+        user_id, created_by, due_date, start_date, task_code, template_key
+      ) VALUES (?, ?, 'todo', 'medium', 0, ?, ?, 1, ?, ?, ?, ?)
     `);
     const addHistory = db.prepare(`
-      INSERT INTO task_history (task_id, user_id, action, field, old_value, new_value)
+      INSERT INTO daily_task_history (task_id, user_id, action, field, old_value, new_value)
       VALUES (?, 1, 'daily_task.generate', 'title', '', ?)
     `);
     const exists = db.prepare(`
-      SELECT id FROM tasks
-      WHERE daily_task_key = ? AND daily_task_date = ? AND daily_task_user_id = ?
+      SELECT id FROM daily_tasks
+      WHERE template_key = ? AND task_date = ? AND user_id = ?
     `);
 
     for (const t of templates) {
-      for (const m of members) {
+      for (const m of activeMembers) {
         if (exists.get(t.key, dateStr, m.user_id)) continue;
         // Minted per row, only for genuinely new tasks, so the daily generator
         // (up to ~100 rows/day) does not waste codes on already-existing ones.
@@ -129,27 +129,24 @@ export function generateDailyTasks(dateStr = today()) {
           t.name,
           t.description || '',
           dateStr,
+          m.user_id,
           dateStr,
-          m.team_id ?? null,
-          m.department_id ?? null,
+          dateStr,
           generateTaskCode('TSK'),
           t.key,
-          dateStr,
-          m.user_id,
         );
         if (res.changes > 0) {
           created++;
-          const taskId = Number(res.lastInsertRowid);
-          addAssignee.run(taskId, m.user_id);
-          addHistory.run(taskId, t.name);
+          addHistory.run(Number(res.lastInsertRowid), t.name);
         }
       }
     }
     if (created > 0) console.log(`[DailyTask] Generated ${created} task(s) for ${dateStr}`);
+    if (skipped > 0) console.log(`[DailyTask] Skipped ${skipped} member(s) on weekend or leave for ${dateStr}`);
   } finally {
     generating = false;
   }
-  return { created, date: dateStr };
+  return { created, skipped, date: dateStr };
 }
 
 /**
@@ -186,44 +183,44 @@ export function reconcileDailyTaskAwards() {
 
     // 1. Completed daily tasks earn their template points.
     const done = db.prepare(`
-      SELECT t.id AS task_id, t.daily_task_key, t.daily_task_user_id AS user_id
-      FROM tasks t
-      WHERE t.daily_task_key <> ''
-        AND t.daily_task_user_id IS NOT NULL
+      SELECT t.id AS task_id, t.template_key, t.user_id
+      FROM daily_tasks t
+      WHERE t.user_id IS NOT NULL
         AND t.status = 'done'
         AND t.completed_at IS NOT NULL
     `).all();
 
     const hasAward = db.prepare('SELECT id FROM daily_task_awards WHERE task_id = ? AND user_id = ?');
     for (const d of done) {
-      const pts = pointsFor.get(d.daily_task_key) ?? getDailyTaskPoints();
+      const pts = pointsFor.get(d.template_key) ?? getDailyTaskPoints();
       if (hasAward.get(d.task_id, d.user_id)) {
         // Keep an existing penalty in step if the task was completed after the
         // day had already rolled over.
         const cur = db.prepare('SELECT points FROM daily_task_awards WHERE task_id = ? AND user_id = ?')
           .get(d.task_id, d.user_id);
-        if (cur && cur.points < 0) { upsert.run(d.task_id, d.user_id, d.daily_task_key, pts); revoked++; }
+        if (cur && cur.points < 0) { upsert.run(d.task_id, d.user_id, d.template_key, pts); revoked++; }
         continue;
       }
-      const res = upsert.run(d.task_id, d.user_id, d.daily_task_key, pts);
+      const res = upsert.run(d.task_id, d.user_id, d.template_key, pts);
       if (res.changes > 0) granted++;
     }
 
     // 2. Past days left unfinished incur the miss penalty.
+    // Cancelled tasks are withdrawn, not unfinished -- the member
+    // was never expected to do them (template disabled, or the
+    // member was unavailable that day), so they are never penalised.
     const missed = db.prepare(`
-      SELECT t.id AS task_id, t.daily_task_key, t.daily_task_user_id AS user_id
-      FROM tasks t
-      WHERE t.daily_task_key <> ''
-        AND t.daily_task_user_id IS NOT NULL
-        AND t.status <> 'done'
-        AND t.daily_task_date IS NOT NULL
-        AND t.daily_task_date < ?
+      SELECT t.id AS task_id, t.template_key, t.user_id
+      FROM daily_tasks t
+      WHERE t.user_id IS NOT NULL
+        AND t.status NOT IN ('done', 'cancelled')
+        AND t.task_date < ?
         AND NOT EXISTS (
-          SELECT 1 FROM daily_task_awards a WHERE a.task_id = t.id AND a.user_id = t.daily_task_user_id
+          SELECT 1 FROM daily_task_awards a WHERE a.task_id = t.id AND a.user_id = t.user_id
         )
     `).all(todayStr);
     for (const d of missed) {
-      const res = upsert.run(d.task_id, d.user_id, d.daily_task_key, getDailyMissPenalty());
+      const res = upsert.run(d.task_id, d.user_id, d.template_key, getDailyMissPenalty());
       if (res.changes > 0) penalised++;
     }
 
@@ -232,7 +229,7 @@ export function reconcileDailyTaskAwards() {
     //    past days are deliberately kept, otherwise step 2 would undo itself.
     const stale = db.prepare(`
       SELECT a.id FROM daily_task_awards a
-      LEFT JOIN tasks t ON t.id = a.task_id
+      LEFT JOIN daily_tasks t ON t.id = a.task_id
       WHERE t.id IS NULL
          OR (t.status <> 'done' AND a.points > 0)
     `).all();
@@ -267,6 +264,46 @@ export function ensureDailyTasks(dateStr = today(), { force = false } = {}) {
 /** Called when membership or template enablement changes, so the day regenerates. */
 export function invalidateGenerationCache() {
   lastGeneratedDate = null;
+}
+
+/**
+ * Cancel today's unfinished daily tasks for members who are
+ * unavailable today (their weekend, or an approved leave
+ * covering the day), and drop their awards. This heals tasks
+ * generated before the member became unavailable -- for
+ * example by an older build that assigned everyone -- so no
+ * task, and no end-of-day miss penalty, can arise from a day
+ * the member never worked. Mirrors what disabling a template
+ * does to today's rows. Past days are history and untouched.
+ */
+export function cancelUnavailableMembersToday(dateStr = today()) {
+  const members = db.prepare(`
+    SELECT m.user_id
+    FROM daily_task_members m
+    JOIN users u ON u.id = m.user_id
+    WHERE u.is_active = 1
+  `).all();
+
+  let cancelled = 0;
+  for (const m of members) {
+    if (checkUserAvailability(m.user_id, dateStr).available) continue;
+    const ids = db.prepare(`
+      SELECT id FROM daily_tasks
+      WHERE user_id = ? AND task_date = ? AND status <> 'done'
+    `).all(m.user_id, dateStr).map((r) => r.id);
+    if (ids.length === 0) continue;
+    const inIds = ids.map(() => '?').join(',');
+    db.prepare(`DELETE FROM daily_task_awards WHERE task_id IN (${inIds})`).run(...ids);
+    db.prepare(`
+      UPDATE daily_tasks SET status = 'cancelled', updated_at = datetime('now', '+6 hours')
+      WHERE id IN (${inIds})
+    `).run(...ids);
+    cancelled += ids.length;
+  }
+  if (cancelled > 0) {
+    console.log(`[DailyTask] Cancelled ${cancelled} task(s) for unavailable members on ${dateStr}`);
+  }
+  return { cancelled, date: dateStr };
 }
 
 /** Milliseconds from now until the next 00:00 in the BD business timezone. */
@@ -307,6 +344,7 @@ export function startDailyTaskService(intervalMinutes = 15) {
   if (intervalId) clearInterval(intervalId);
   const tick = () => {
     try {
+      cancelUnavailableMembersToday();
       ensureDailyTasks();
       reconcileDailyTaskAwards();
     } catch (err) {

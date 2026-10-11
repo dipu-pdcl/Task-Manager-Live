@@ -90,10 +90,15 @@ export function calculateUserKpi(userId, fromDate, toDate) {
     if (assigneeCompleted || (isCreator && assigneeCompleted)) {
       completed++;
       
-      // Check if completed on time
+      // Check if completed on time. due_date is a bare
+      // date (YYYY-MM-DD) while completed_at carries a
+      // time, so compare against the end of the due day:
+      // a timestamp against midnight would count every
+      // task finished after 00:00 on its due date as
+      // overdue, dropping the completion rate to 0%.
       const dueDate = task.due_date;
       const completedAt = task.completed_at;
-      if (dueDate && completedAt && new Date(completedAt) <= new Date(dueDate)) {
+      if (dueDate && completedAt && completedAt <= `${dueDate} 23:59:59`) {
         onTime++;
       } else if (dueDate) {
         overdueCount++;
@@ -186,7 +191,46 @@ export function calculateUserKpi(userId, fromDate, toDate) {
     }
   }
 
-  const completionRate = completed > 0 ? Math.round((onTime / completed) * 100) : 0;
+  // Daily tasks live in their own module, separate from the main
+  // task table, but their awarded points still count toward the
+  // user's total KPI score. Awards are attributed to the day the
+  // work belonged to, so a period total matches that period's daily
+  // completions and misses.
+  const dailyAwards = db.prepare(`
+    SELECT a.points
+    FROM daily_task_awards a
+    JOIN daily_tasks dt ON dt.id = a.task_id
+    WHERE a.user_id = ?
+      AND dt.task_date >= ? AND dt.task_date <= ?
+  `).all(userId, fromDate, toDate);
+
+  if (dailyAwards.length > 0) {
+    let dailyDone = 0;
+    let dailyMissed = 0;
+    for (const a of dailyAwards) {
+      if (a.points >= 0) dailyDone += a.points;
+      else dailyMissed += a.points;
+      totalPoints += a.points;
+    }
+    if (dailyDone !== 0) breakdown['daily_task_complete'] = (breakdown['daily_task_complete'] || 0) + dailyDone;
+    if (dailyMissed !== 0) breakdown['daily_task_overdue'] = (breakdown['daily_task_overdue'] || 0) + dailyMissed;
+  }
+
+  // Task completion rate: the share of the user's
+  // tasks whose status is Done. Based purely on
+  // completion status -- due dates are not part
+  // of the calculation.
+  const taskCounts = db.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) AS done
+    FROM tasks t
+    INNER JOIN task_assignees ta ON ta.task_id = t.id
+    WHERE ta.user_id = ? AND t.archived = 0
+  `).get(userId);
+  const totalTasks = Number(taskCounts?.total || 0);
+  const doneTasks = Number(taskCounts?.done || 0);
+  const completionRate = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
   const avgCompletionHours = completed > 0 ? Math.round(totalCompletionHours / completed * 10) / 10 : 0;
 
   return { 
@@ -343,7 +387,7 @@ export function calculateTaskKpi(task, userId, assigneeIds) {
   
   const dueDate = task.due_date;
   const completedAt = task.completed_at;
-  if (dueDate && completedAt && new Date(completedAt) > new Date(dueDate)) {
+  if (dueDate && completedAt && completedAt > `${dueDate} 23:59:59`) {
     const penalty = getKpiRule('overdue_task');
     if (penalty !== 0) {
       transactions.push({
@@ -430,10 +474,14 @@ export function getCompletedTasksWithKpi(fromDate, toDate) {
       if (createBonus !== 0) { breakdown['create_task_bonus'] = createBonus; points += createBonus; }
     }
     
-    // Overdue penalty
+    // Overdue penalty. due_date is a bare date while
+    // completed_at carries a time, so compare against
+    // the end of the due day: a timestamp against
+    // midnight would penalise every task finished
+    // after 00:00 on its due date.
     const dueDate = task.due_date;
     const completedAt = task.completed_at;
-    if (dueDate && completedAt && new Date(completedAt) > new Date(dueDate)) {
+    if (dueDate && completedAt && completedAt > `${dueDate} 23:59:59`) {
       const penalty = getKpiRule('overdue_task');
       if (penalty !== 0) { breakdown['overdue_task'] = penalty; points += penalty; }
     }
@@ -451,8 +499,8 @@ export function getCompletedTasksWithKpi(fromDate, toDate) {
       points,
       breakdown,
       completed: 1,
-      onTime: dueDate && completedAt && new Date(completedAt) <= new Date(dueDate) ? 1 : 0,
-      overdue: dueDate && completedAt && new Date(completedAt) > new Date(dueDate) ? 1 : 0,
+      onTime: dueDate && completedAt && completedAt <= `${dueDate} 23:59:59` ? 1 : 0,
+      overdue: dueDate && completedAt && completedAt > `${dueDate} 23:59:59` ? 1 : 0,
       hours: task.created_at && completedAt ? (new Date(completedAt) - new Date(task.created_at)) / (1000 * 60 * 60) : 0,
     });
   }
