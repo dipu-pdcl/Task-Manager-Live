@@ -4,7 +4,7 @@ import {
   Copy, Check, Shield, RefreshCw, Mail, Phone, Building2, Users as UsersIcon,
   Download, CheckSquare, Clock, Filter, X, ChevronRight, Activity, Calendar,
   CalendarCheck,
-  Lock
+  Lock, Timer, AlertTriangle
 } from 'lucide-react';
 import { api } from '../lib/api';
 import type { User, LiveStatusType, RoleGroup, Role } from '../lib/types';
@@ -419,7 +419,7 @@ export default function Users() {
   // Export to CSV
   const exportUsersCSV = () => {
     if (filtered.length === 0) return toast('No users to export', 'error');
-    const headers = ['ID', 'Name', 'Email', 'Role', 'Role Group', 'Employee ID', 'Title', 'Phone', 'Branch', 'Team', 'Assigned Weekend', 'Duty Time', 'Account Status', 'Live Status', 'Open Tasks', 'Completed Tasks', 'Created At'];
+    const headers = ['ID', 'Name', 'Email', 'Role', 'Role Group', 'Employee ID', 'Title', 'Phone', 'Branch', 'Team', 'Assigned Weekend', 'Duty Time', 'Account Status', 'Live Status', 'Open Tasks', 'Completed Tasks', 'On-Time Tasks', 'Overdue Tasks', 'Created At'];
     const rows = filtered.map((u) => [
       u.id,
       `"${u.name.replace(/"/g, '""')}"`,
@@ -437,6 +437,8 @@ export default function Users() {
       u.live_status || 'inactive',
       u.open_tasks || 0,
       u.completed_tasks || 0,
+      u.on_time_tasks || 0,
+      u.overdue_tasks || 0,
       u.created_at || '',
     ]);
 
@@ -798,7 +800,7 @@ export default function Users() {
                   </div>
 
                   {/* Tasks & Workload Summary */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3 p-2 rounded-lg bg-card2/50 border border-line/50 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mt-3 p-2 rounded-lg bg-card2/50 border border-line/50 text-xs">
                     <div className="flex items-center gap-1.5">
                       <CheckSquare size={13} className="text-amber-500 shrink-0" />
                       <span className="text-ink3">Open Tasks:</span>
@@ -808,6 +810,16 @@ export default function Users() {
                       <Check size={13} className="text-emerald-500 shrink-0" />
                       <span className="text-ink3">Completed:</span>
                       <span className="font-bold text-ink1">{u.completed_tasks || 0}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Timer size={13} className="text-blue-500 shrink-0" />
+                      <span className="text-ink3">On-Time:</span>
+                      <span className="font-bold text-blue-600">{u.on_time_tasks || 0}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <AlertTriangle size={13} className="text-red-500 shrink-0" />
+                      <span className="text-ink3">Overdue:</span>
+                      <span className="font-bold text-red-600">{u.overdue_tasks || 0}</span>
                     </div>
                   </div>
                 </div>
@@ -1313,6 +1325,16 @@ export default function Users() {
               <div className="p-2.5 rounded-lg bg-card border border-line">
                 <div className="text-ink3 text-[11px]">Completed Tasks</div>
                 <div className="font-bold text-emerald-600 mt-1">{dossierUser.completed_tasks || 0}</div>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-card border border-line">
+                <div className="text-ink3 text-[11px]">On-Time Tasks</div>
+                <div className="font-bold text-blue-600 mt-1">{dossierUser.on_time_tasks || 0}</div>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-card border border-line">
+                <div className="text-ink3 text-[11px]">Overdue Tasks</div>
+                <div className="font-bold text-red-600 mt-1">{dossierUser.overdue_tasks || 0}</div>
               </div>
             </div>
 

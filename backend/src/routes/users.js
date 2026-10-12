@@ -27,6 +27,8 @@ function userRow(u, requester = null) {
     department_manager_ext: u.department_manager_ext || '',
     open_tasks: Number(u.open_tasks || 0),
     completed_tasks: Number(u.completed_tasks || 0),
+    on_time_tasks: Number(u.on_time_tasks || 0),
+    overdue_tasks: Number(u.overdue_tasks || 0),
     tasks_created: Number(u.tasks_created || 0),
     is_daily_task_member: Number(u.is_daily_task_member || 0) === 1,
   };
@@ -94,6 +96,12 @@ router.get('/', (req, res) => {
           WHERE ta.user_id = u.id AND tk.status NOT IN ('done', 'cancelled')) AS open_tasks,
         (SELECT COUNT(*) FROM task_assignees ta JOIN tasks tk ON tk.id = ta.task_id
           WHERE ta.user_id = u.id AND tk.status = 'done') AS completed_tasks,
+        (SELECT COUNT(*) FROM task_assignees ta JOIN tasks tk ON tk.id = ta.task_id
+          WHERE ta.user_id = u.id AND tk.status = 'done' AND tk.due_date IS NOT NULL
+          AND tk.completed_at <= tk.due_date || ' 23:59:59') AS on_time_tasks,
+        (SELECT COUNT(*) FROM task_assignees ta JOIN tasks tk ON tk.id = ta.task_id
+          WHERE ta.user_id = u.id AND tk.status = 'done' AND tk.due_date IS NOT NULL
+          AND tk.completed_at > tk.due_date || ' 23:59:59') AS overdue_tasks,
         (SELECT COUNT(*) FROM tasks t2 WHERE t2.created_by = u.id) AS tasks_created,
         ${DAILY_MEMBER_SELECT}
       FROM users u
@@ -124,6 +132,12 @@ router.get('/', (req, res) => {
         WHERE ta.user_id = u.id AND tk.status NOT IN ('done', 'cancelled')) AS open_tasks,
       (SELECT COUNT(*) FROM task_assignees ta JOIN tasks tk ON tk.id = ta.task_id
         WHERE ta.user_id = u.id AND tk.status = 'done') AS completed_tasks,
+      (SELECT COUNT(*) FROM task_assignees ta JOIN tasks tk ON tk.id = ta.task_id
+        WHERE ta.user_id = u.id AND tk.status = 'done' AND tk.due_date IS NOT NULL
+        AND tk.completed_at <= tk.due_date || ' 23:59:59') AS on_time_tasks,
+      (SELECT COUNT(*) FROM task_assignees ta JOIN tasks tk ON tk.id = ta.task_id
+        WHERE ta.user_id = u.id AND tk.status = 'done' AND tk.due_date IS NOT NULL
+        AND tk.completed_at > tk.due_date || ' 23:59:59') AS overdue_tasks,
       (SELECT COUNT(*) FROM tasks t2 WHERE t2.created_by = u.id) AS tasks_created,
       ${DAILY_MEMBER_SELECT}
     FROM users u
@@ -252,6 +266,12 @@ router.get('/:id', (req, res) => {
         WHERE ta.user_id = u.id AND tk.status NOT IN ('done', 'cancelled')) AS open_tasks,
       (SELECT COUNT(*) FROM task_assignees ta JOIN tasks tk ON tk.id = ta.task_id
         WHERE ta.user_id = u.id AND tk.status = 'done') AS completed_tasks,
+      (SELECT COUNT(*) FROM task_assignees ta JOIN tasks tk ON tk.id = ta.task_id
+        WHERE ta.user_id = u.id AND tk.status = 'done' AND tk.due_date IS NOT NULL
+        AND tk.completed_at <= tk.due_date || ' 23:59:59') AS on_time_tasks,
+      (SELECT COUNT(*) FROM task_assignees ta JOIN tasks tk ON tk.id = ta.task_id
+        WHERE ta.user_id = u.id AND tk.status = 'done' AND tk.due_date IS NOT NULL
+        AND tk.completed_at > tk.due_date || ' 23:59:59') AS overdue_tasks,
       (SELECT COUNT(*) FROM tasks t2 WHERE t2.created_by = u.id) AS tasks_created,
       ${DAILY_MEMBER_SELECT}
     FROM users u
@@ -481,6 +501,12 @@ router.put('/:id', requirePermission('users.manage'), (req, res) => {
         WHERE ta.user_id = u.id AND tk.status NOT IN ('done', 'cancelled')) AS open_tasks,
       (SELECT COUNT(*) FROM task_assignees ta JOIN tasks tk ON tk.id = ta.task_id
         WHERE ta.user_id = u.id AND tk.status = 'done') AS completed_tasks,
+      (SELECT COUNT(*) FROM task_assignees ta JOIN tasks tk ON tk.id = ta.task_id
+        WHERE ta.user_id = u.id AND tk.status = 'done' AND tk.due_date IS NOT NULL
+        AND tk.completed_at <= tk.due_date || ' 23:59:59') AS on_time_tasks,
+      (SELECT COUNT(*) FROM task_assignees ta JOIN tasks tk ON tk.id = ta.task_id
+        WHERE ta.user_id = u.id AND tk.status = 'done' AND tk.due_date IS NOT NULL
+        AND tk.completed_at > tk.due_date || ' 23:59:59') AS overdue_tasks,
       (SELECT COUNT(*) FROM tasks t2 WHERE t2.created_by = u.id) AS tasks_created,
       ${DAILY_MEMBER_SELECT}
     FROM users u

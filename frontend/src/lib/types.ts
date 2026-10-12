@@ -68,6 +68,8 @@ export interface User {
   initials?: string;
   open_tasks?: number;
   completed_tasks?: number;
+  on_time_tasks?: number;
+  overdue_tasks?: number;
   tasks_created?: number;
   /**
    * Present only when the list was requested with assignable=1. False means the
