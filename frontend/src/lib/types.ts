@@ -446,6 +446,14 @@ export interface DashboardData {
     completionRate: number; avgCompletionHours: number;
     budgetUtil: { budget: number; hours: number };
   };
+  kpi?: {
+    score: number;
+    completed: number;
+    onTime: number;
+    overdueCount: number;
+    completionRate: number;
+    avgCompletionHours: number;
+  } | null;
   daily: { day: string; date: string; added: number; done: number }[];
   monthly: { day: string; date: string; added: number; done: number }[];
   completionTrend: { day: string; date: string; completed: number }[];

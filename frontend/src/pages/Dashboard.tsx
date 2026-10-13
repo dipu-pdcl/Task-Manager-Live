@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   ListTodo, CircleDashed, Target, CheckCircle2, CalendarClock, Clock3, Timer,
   CalendarDays, AlertOctagon, Activity, TrendingUp, Gauge,
-  Sparkles, ChevronRight
+  Sparkles, ChevronRight, Award
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -76,6 +76,7 @@ export default function Dashboard() {
     { label: 'In Progress', value: s?.inProgress, icon: <Activity size={19} />, color: '#f97316', sub: `${s?.inReview} in review` },
     { label: 'Avg. Completion', value: `${s?.avgCompletionHours}h`, icon: <Timer size={19} />, color: '#a855f7', sub: 'avg hours' },
     { label: 'Blocked Tasks', value: s?.blocked, icon: <AlertOctagon size={19} />, color: '#ef4444', sub: 'awaiting unblock' },
+    { label: 'My KPI Score', value: data?.kpi?.score ?? '—', icon: <Award size={19} />, color: '#8b5cf6', sub: 'performance score' },
   ];
 
   return (
@@ -166,8 +167,32 @@ export default function Dashboard() {
         </ChartCard>
       )}
 
-      {!isAdmin && (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      {!isAdmin && data?.kpi && (
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+          <ChartCard title="My KPI Breakdown" subtitle="Performance detail (this month)">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                <div className="text-ink3 text-[11px] uppercase tracking-wider">Completed</div>
+                <div className="text-2xl font-extrabold text-emerald-600 mt-1">{data.kpi.completed}</div>
+              </div>
+              <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                <div className="text-ink3 text-[11px] uppercase tracking-wider">On-Time</div>
+                <div className="text-2xl font-extrabold text-blue-600 mt-1">{data.kpi.onTime}</div>
+              </div>
+              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                <div className="text-ink3 text-[11px] uppercase tracking-wider">Overdue</div>
+                <div className="text-2xl font-extrabold text-red-600 mt-1">{data.kpi.overdueCount}</div>
+              </div>
+              <div className="p-3 rounded-lg bg-card2 border border-line">
+                <div className="text-ink3 text-[11px] uppercase tracking-wider">Completion Rate</div>
+                <div className="text-2xl font-extrabold text-ink1 mt-1">{data.kpi.completionRate}%</div>
+              </div>
+            </div>
+            <div className="mt-3 text-xs text-ink2 flex items-center justify-between">
+              <span>Avg completion: <b className="text-ink1">{data.kpi.avgCompletionHours}h</b></span>
+              <span className="text-ink3">Score: <b className="text-brand">{data.kpi.score}</b> pts</span>
+            </div>
+          </ChartCard>
           <DonutChartCard title="My Task Progress" subtitle="Distribution of your tasks" centerLabel={String(s?.total)}
             data={(data?.statusDist || []).map((x) => ({ name: x.name, value: x.count, color: x.color }))} />
           <ChartCard title="My Recent Notifications">

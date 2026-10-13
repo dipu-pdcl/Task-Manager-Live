@@ -4,6 +4,7 @@ import { requireAuth, isAdmin } from '../middleware.js';
 import { dateRangeFromKey, today, dateDaysAgo, bdNow } from '../utils.js';
 import { getSettings } from '../config.js';
 import { buildTaskFilter, scopeSql, notDailyTaskSql } from '../filters.js';
+import { calculateUserKpiForPeriod } from '../services/kpiEngine.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -178,6 +179,22 @@ router.get('/', (req, res) => {
     FROM tasks t WHERE status='done' AND completed_at IS NOT NULL AND ${scope}`).get(...P()).v;
   summary.avgCompletionHours = avgH || 0;
 
+  // User-only KPI: restore the performance score that was visible on the
+  // user dashboard before the KPI module was reworked. Admins see the same
+  // aggregate stats as everyone else; the score card only appears for users.
+  let kpi = null;
+  if (!admin) {
+    const kpiData = calculateUserKpiForPeriod(uid, 'month');
+    kpi = {
+      score: kpiData.score,
+      completed: kpiData.completed,
+      onTime: kpiData.onTime,
+      overdueCount: kpiData.overdueCount,
+      completionRate: kpiData.completionRate,
+      avgCompletionHours: kpiData.avgCompletionHours,
+    };
+  }
+
   const calendar = db.prepare(`
     SELECT t.id, t.title, t.due_date, t.status, t.priority FROM tasks t
     WHERE ${scope} AND t.due_date IS NOT NULL AND t.status NOT IN ('done','cancelled')
@@ -186,6 +203,7 @@ router.get('/', (req, res) => {
 
   res.json({
     summary,
+    kpi,
     daily,
     monthly,
     completionTrend,
