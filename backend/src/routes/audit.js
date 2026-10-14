@@ -52,4 +52,14 @@ router.delete('/', requirePermission('audit.clear'), (req, res) => {
   }
 });
 
+// Delete a single audit log entry (Super Admin only)
+router.delete('/:id', requirePermission('audit.clear'), (req, res) => {
+  const id = Number(req.params.id);
+  const entry = db.prepare('SELECT * FROM audit_logs WHERE id = ?').get(id);
+  if (!entry) return res.status(404).json({ error: 'Audit log not found' });
+  db.prepare('DELETE FROM audit_logs WHERE id = ?').run(id);
+  audit(req, 'audit.delete', 'audit_logs', id, `Deleted audit log: ${entry.action} by ${entry.user_name || 'System'}`);
+  res.json({ ok: true });
+});
+
 export default router;
