@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db } from '../db.js';
 import { requireAuth, requirePermission, requireAdmin, isAdmin, hasPermission, audit, logHistory, notify } from '../middleware.js';
 import { dateRangeFromKey, today, now, checkUserAvailability } from '../utils.js';
+import { isPastDailyTask } from '../services/dailyTaskService.js';
 import { getStatusById, getPriorityById, getDifficultyById } from '../config.js';
 import { updateProjectProgressForTask } from './projects.js';
 import { generateTaskCode } from '../services/taskCodeService.js';
@@ -602,8 +603,8 @@ router.delete('/:id', loadTask, requirePermission('tasks.delete'), (req, res) =>
       error: `This daily task is read-only and cannot be deleted (task date ${t.daily_task_date}).`,
     });
   }
-  db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
-  audit(req, 'task.delete', 'task', id, `Deleted task "${t.title}"`);
+  db.prepare('DELETE FROM tasks WHERE id = ?').run(t.id);
+  audit(req, 'task.delete', 'task', t.id, `Deleted task "${t.title}"`);
   res.json({ ok: true });
 });
 
