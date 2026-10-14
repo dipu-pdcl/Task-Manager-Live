@@ -579,10 +579,27 @@ router.put('/:id', loadTask, requireTaskWrite, (req, res) => {
   res.json(taskJson(db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)));
 });
 
-router.delete('/:id', requirePermission('tasks.delete'), (req, res) => {
-  const id = Number(req.params.id);
-  const t = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
-  if (!t) return res.status(404).json({ error: 'Task not found' });
+router.delete('/:id', loadTask, requirePermission('tasks.delete'), (req, res) => {
+  const t = req.task;
+  const uid = req.user.id;
+  const isSuper = req.user.role === 'super_admin';
+  const isAdminUser = req.user.role === 'admin';
+
+  // Ownership check: super_admin and admin can only delete their own tasks or tasks they're assigned to
+  if (!isSuper && !isAdminUser) {
+    // This shouldn't happen due to permission check, but safety first
+    return res.status(403).json({ error: 'No permission to delete tasks' });
+  }
+
+  // Check if user owns the task (created it or is assigned to it)
+  const assigneeIds = (req.taskAssignees || []).map(a => a.user_id);
+  const isOwner = t.created_by === uid;
+  const isAssignee = assigneeIds.includes(uid);
+
+  if (!isOwner && !isAssignee) {
+    return res.status(403).json({ error: 'You can only delete tasks you created or are assigned to' });
+  }
+
   if (isPastDailyTask(t)) {
     return res.status(403).json({
       error: `This daily task is read-only and cannot be deleted (task date ${t.daily_task_date}).`,
