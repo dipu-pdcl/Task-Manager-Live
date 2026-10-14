@@ -585,19 +585,16 @@ router.delete('/:id', loadTask, requirePermission('tasks.delete'), (req, res) =>
   const isSuper = req.user.role === 'super_admin';
   const isAdminUser = req.user.role === 'admin';
 
-  // Ownership check: super_admin and admin can only delete their own tasks or tasks they're assigned to
-  if (!isSuper && !isAdminUser) {
-    // This shouldn't happen due to permission check, but safety first
-    return res.status(403).json({ error: 'No permission to delete tasks' });
-  }
+  // Super Admin can delete ANY task
+  if (!isSuper) {
+    // Admin and other roles with tasks.delete: can only delete their own tasks or tasks they're assigned to
+    const assigneeIds = (req.taskAssignees || []).map(a => a.user_id);
+    const isOwner = t.created_by === uid;
+    const isAssignee = assigneeIds.includes(uid);
 
-  // Check if user owns the task (created it or is assigned to it)
-  const assigneeIds = (req.taskAssignees || []).map(a => a.user_id);
-  const isOwner = t.created_by === uid;
-  const isAssignee = assigneeIds.includes(uid);
-
-  if (!isOwner && !isAssignee) {
-    return res.status(403).json({ error: 'You can only delete tasks you created or are assigned to' });
+    if (!isOwner && !isAssignee) {
+      return res.status(403).json({ error: 'You can only delete tasks you created or are assigned to' });
+    }
   }
 
   if (isPastDailyTask(t)) {
