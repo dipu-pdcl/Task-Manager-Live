@@ -16,7 +16,7 @@ function recomputeProjectProgress(projectId) {
   const stats = db.prepare(`
     SELECT
       COUNT(*) AS total,
-      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_count,
+      SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done_count,
       SUM(CASE WHEN status IN ('in_progress','in_review') THEN 1 ELSE 0 END) AS wip_count,
       SUM(CASE WHEN status = 'todo' THEN 1 ELSE 0 END) AS todo_count,
       SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled_count
@@ -24,10 +24,10 @@ function recomputeProjectProgress(projectId) {
     WHERE project_id = ? AND archived = 0
   `).get(projectId);
   const total = stats?.total || 0;
-  const completed = stats?.completed_count || 0;
-  const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const done = stats?.done_count || 0;
+  const progress = total > 0 ? Math.round((done / total) * 100) : 0;
   db.prepare('UPDATE projects SET progress = ?, updated_at = datetime(\'now\', \'+6 hours\') WHERE id = ?').run(progress, projectId);
-  return { total, completed, progress, wip: stats?.wip_count || 0, todo: stats?.todo_count || 0, cancelled: stats?.cancelled_count || 0 };
+  return { total, done, progress, wip: stats?.wip_count || 0, todo: stats?.todo_count || 0, cancelled: stats?.cancelled_count || 0 };
 }
 
 function getMemberIds(projectId) {
@@ -57,7 +57,7 @@ function enrichProject(p, userId, isUserAdmin) {
   const taskStats = db.prepare(`
     SELECT
       COUNT(*) AS total,
-      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS done,
+      SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done,
       SUM(CASE WHEN status IN ('in_progress','in_review') THEN 1 ELSE 0 END) AS wip,
       SUM(CASE WHEN status = 'todo' THEN 1 ELSE 0 END) AS todo,
       SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled
@@ -122,10 +122,10 @@ router.get('/:id', (req, res) => {
     ORDER BY pm.role DESC, u.name
   `).all(project.id);
 
-  const taskStats = db.prepare(`
+const taskStats = db.prepare(`
     SELECT
       COUNT(*) AS total,
-      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS done,
+      SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done,
       SUM(CASE WHEN status IN ('in_progress','in_review') THEN 1 ELSE 0 END) AS wip,
       SUM(CASE WHEN status = 'todo' THEN 1 ELSE 0 END) AS todo,
       SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled
@@ -136,7 +136,7 @@ router.get('/:id', (req, res) => {
     SELECT t.id, t.title, t.status, t.priority, t.due_date, t.start_date, t.progress, t.completed_at, t.updated_at
     FROM tasks t
     WHERE t.project_id = ? AND t.archived = 0
-    ORDER BY (CASE WHEN t.status = 'in_progress' THEN 0 WHEN t.status = 'in_review' THEN 1 WHEN t.status = 'todo' THEN 2 WHEN t.status = 'completed' THEN 3 ELSE 4 END), t.due_date
+    ORDER BY (CASE WHEN t.status = 'in_progress' THEN 0 WHEN t.status = 'in_review' THEN 1 WHEN t.status = 'todo' THEN 2 WHEN t.status = 'done' THEN 3 ELSE 4 END), t.due_date
   `).all(project.id);
 
   const assigneesByTask = db.prepare(`
@@ -261,7 +261,7 @@ router.put('/:id', (req, res) => {
       const taskStats = db.prepare(`
         SELECT 
           COUNT(*) AS total,
-          SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_count
+          SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS completed_count
         FROM tasks WHERE project_id = ? AND archived = 0
       `).get(id);
       
@@ -469,7 +469,7 @@ router.get('/:id/stats', (req, res) => {
   `).all(project.id);
   const memberContrib = db.prepare(`
     SELECT u.id, u.name, u.avatar,
-           SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) AS done,
+           SUM(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) AS done,
            COUNT(DISTINCT t.id) AS total
     FROM project_members pm
     JOIN users u ON u.id = pm.user_id
