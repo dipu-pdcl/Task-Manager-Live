@@ -332,7 +332,7 @@ export interface Project {
   id: number;
   name: string;
   description?: string;
-  status: 'active' | 'on_hold' | 'completed' | 'cancelled';
+  status: 'active' | 'on_hold' | 'completed' | 'cancelled' | 'done';
   priority: 'low' | 'medium' | 'high' | 'critical';
   start_date?: string | null;
   deadline?: string | null;

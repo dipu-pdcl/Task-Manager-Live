@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db.js';
-import { requireAuth, requirePermission, requireAdmin, isAdmin, hasPermission, audit, logHistory, notify } from '../middleware.js';
+import { requireAuth, requirePermission, requireAdmin, isAdmin, hasPermission, audit, logHistory, notify, isSuperAdmin } from '../middleware.js';
 import { dateRangeFromKey, today, now, checkUserAvailability } from '../utils.js';
 import { isPastDailyTask } from '../services/dailyTaskService.js';
 import { getStatusById, getPriorityById, getDifficultyById } from '../config.js';

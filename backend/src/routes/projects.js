@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db.js';
-import { requireAuth, requireAdmin, isAdmin, audit } from '../middleware.js';
+import { requireAuth, requireAdmin, isAdmin, audit, isSuperAdmin } from '../middleware.js';
 import { notify } from '../middleware.js';
 import { generateTaskCode } from '../services/taskCodeService.js';
 import { today, checkUserAvailability } from '../utils.js';
@@ -16,7 +16,7 @@ function recomputeProjectProgress(projectId) {
   const stats = db.prepare(`
     SELECT
       COUNT(*) AS total,
-      SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done_count,
+      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_count,
       SUM(CASE WHEN status IN ('in_progress','in_review') THEN 1 ELSE 0 END) AS wip_count,
       SUM(CASE WHEN status = 'todo' THEN 1 ELSE 0 END) AS todo_count,
       SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled_count
@@ -24,10 +24,10 @@ function recomputeProjectProgress(projectId) {
     WHERE project_id = ? AND archived = 0
   `).get(projectId);
   const total = stats?.total || 0;
-  const done = stats?.done_count || 0;
-  const progress = total > 0 ? Math.round((done / total) * 100) : 0;
+  const completed = stats?.completed_count || 0;
+  const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
   db.prepare('UPDATE projects SET progress = ?, updated_at = datetime(\'now\', \'+6 hours\') WHERE id = ?').run(progress, projectId);
-  return { total, done, progress, wip: stats?.wip_count || 0, todo: stats?.todo_count || 0, cancelled: stats?.cancelled_count || 0 };
+  return { total, completed, progress, wip: stats?.wip_count || 0, todo: stats?.todo_count || 0, cancelled: stats?.cancelled_count || 0 };
 }
 
 function getMemberIds(projectId) {
@@ -57,7 +57,7 @@ function enrichProject(p, userId, isUserAdmin) {
   const taskStats = db.prepare(`
     SELECT
       COUNT(*) AS total,
-      SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done,
+      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS done,
       SUM(CASE WHEN status IN ('in_progress','in_review') THEN 1 ELSE 0 END) AS wip,
       SUM(CASE WHEN status = 'todo' THEN 1 ELSE 0 END) AS todo,
       SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled
@@ -73,9 +73,6 @@ function enrichProject(p, userId, isUserAdmin) {
     wip_count: taskStats?.wip || 0,
     todo_count: taskStats?.todo || 0,
     cancelled_count: taskStats?.cancelled || 0,
-    progress: taskStats?.total ? Math.round(((taskStats.done || 0) / taskStats.total) * 100) : 0,
-    creator: creator ? { id: creator.id, name: creator.name, avatar: creator.avatar, role: creator.role } : null,
-    is_member: isMember,
   };
 }
 
@@ -128,7 +125,7 @@ router.get('/:id', (req, res) => {
   const taskStats = db.prepare(`
     SELECT
       COUNT(*) AS total,
-      SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done,
+      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS done,
       SUM(CASE WHEN status IN ('in_progress','in_review') THEN 1 ELSE 0 END) AS wip,
       SUM(CASE WHEN status = 'todo' THEN 1 ELSE 0 END) AS todo,
       SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled
@@ -139,7 +136,7 @@ router.get('/:id', (req, res) => {
     SELECT t.id, t.title, t.status, t.priority, t.due_date, t.start_date, t.progress, t.completed_at, t.updated_at
     FROM tasks t
     WHERE t.project_id = ? AND t.archived = 0
-    ORDER BY (CASE WHEN t.status = 'in_progress' THEN 0 WHEN t.status = 'in_review' THEN 1 WHEN t.status = 'todo' THEN 2 WHEN t.status = 'done' THEN 3 ELSE 4 END), t.due_date
+    ORDER BY (CASE WHEN t.status = 'in_progress' THEN 0 WHEN t.status = 'in_review' THEN 1 WHEN t.status = 'todo' THEN 2 WHEN t.status = 'completed' THEN 3 ELSE 4 END), t.due_date
   `).all(project.id);
 
   const assigneesByTask = db.prepare(`
@@ -238,11 +235,47 @@ router.put('/:id', (req, res) => {
   const { id } = req.params;
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(Number(id));
   if (!project) return res.status(404).json({ error: 'Project not found' });
+  
+  // Check if project is already COMPLETED (locked) - only superadmin can edit
+  if (project.status === 'completed' && !isSuperAdmin(req.user)) {
+    return res.status(403).json({ error: 'This project is locked and cannot be modified' });
+  }
+  
   if (!canManageProject(project, userId, isUserAdmin)) return res.status(403).json({ error: 'Not authorized to edit this project' });
 
   const { name, description, priority, start_date, deadline, budget, spent, color, status } = req.body || {};
   const updates = [];
   const params = [];
+  
+  // Handle status change to 'completed' with special validation
+  if (typeof status === 'string' && STATUSES.includes(status)) {
+    if (status === 'completed') {
+      // Only project creator can mark project as COMPLETED
+      if (project.created_by !== userId) {
+        return res.status(403).json({ error: 'Only the project creator can mark the project as COMPLETED' });
+      }
+      
+      // Optional: Check if all tasks are completed before allowing COMPLETED status
+      // Uncomment the following if you want to enforce that all tasks must be completed first
+      /*
+      const taskStats = db.prepare(`
+        SELECT 
+          COUNT(*) AS total,
+          SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_count
+        FROM tasks WHERE project_id = ? AND archived = 0
+      `).get(id);
+      
+      if (taskStats && taskStats.total > 0 && taskStats.completed_count < taskStats.total) {
+        return res.status(400).json({ 
+          error: 'Cannot mark project as COMPLETED until all tasks are completed' 
+        });
+      }
+      */
+    }
+    updates.push('status = ?');
+    params.push(status);
+  }
+  
   if (typeof name === 'string' && name.trim()) { updates.push('name = ?'); params.push(name.trim()); }
   if (typeof description === 'string') { updates.push('description = ?'); params.push(description.trim()); }
   if (typeof priority === 'string' && PRIORITIES.includes(priority)) { updates.push('priority = ?'); params.push(priority); }
@@ -251,7 +284,6 @@ router.put('/:id', (req, res) => {
   if (budget !== undefined) { updates.push('budget = ?'); params.push(Number(budget) || 0); }
   if (spent !== undefined) { updates.push('spent = ?'); params.push(Number(spent) || 0); }
   if (typeof color === 'string') { updates.push('color = ?'); params.push(color); }
-  if (typeof status === 'string' && STATUSES.includes(status)) { updates.push('status = ?'); params.push(status); }
 
   if (updates.length === 0) return res.json({ project: enrichProject(project, userId, isUserAdmin) });
   updates.push("updated_at = datetime('now','+6 hours')");
@@ -266,6 +298,12 @@ router.put('/:id', (req, res) => {
 router.delete('/:id', requireAdmin, (req, res) => {
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(Number(req.params.id));
   if (!project) return res.status(404).json({ error: 'Project not found' });
+  
+  // Locked projects (status = 'completed') can only be archived by superadmin
+  if (project.status === 'completed' && !isSuperAdmin(req.user)) {
+    return res.status(403).json({ error: 'This project is locked and cannot be modified' });
+  }
+  
   db.prepare("UPDATE projects SET archived = 1, status = 'cancelled', updated_at = datetime('now','+6 hours') WHERE id = ?").run(project.id);
   audit(req, 'project.archive', 'project', project.id, `Archived project "${project.name}"`);
   res.json({ ok: true });
@@ -277,6 +315,12 @@ router.post('/:id/members', (req, res) => {
   const { id } = req.params;
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(Number(id));
   if (!project) return res.status(404).json({ error: 'Project not found' });
+  
+  // Locked projects (status = 'completed') cannot have members modified
+  if (project.status === 'completed' && !isSuperAdmin(req.user)) {
+    return res.status(403).json({ error: 'This project is locked and cannot be modified' });
+  }
+  
   if (!canManageProject(project, userId, isUserAdmin)) return res.status(403).json({ error: 'Not authorized' });
   const { userIds, role = 'member' } = req.body || {};
   if (!Array.isArray(userIds) || userIds.length === 0) return res.status(400).json({ error: 'userIds array required' });
@@ -306,6 +350,12 @@ router.delete('/:id/members/:userId', (req, res) => {
   const { id, userId } = req.params;
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(Number(id));
   if (!project) return res.status(404).json({ error: 'Project not found' });
+  
+  // Locked projects (status = 'completed') cannot have members modified
+  if (project.status === 'completed' && !isSuperAdmin(req.user)) {
+    return res.status(403).json({ error: 'This project is locked and cannot be modified' });
+  }
+  
   const targetId = Number(userId);
   const selfLeave = targetId === callerId;
   if (!selfLeave && !canManageProject(project, callerId, isUserAdmin)) {
@@ -326,6 +376,12 @@ router.put('/:id/members/:userId', (req, res) => {
   const { id, userId } = req.params;
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(Number(id));
   if (!project) return res.status(404).json({ error: 'Project not found' });
+  
+  // Locked projects (status = 'completed') cannot have members modified
+  if (project.status === 'completed' && !isSuperAdmin(req.user)) {
+    return res.status(403).json({ error: 'This project is locked and cannot be modified' });
+  }
+  
   if (!canManageProject(project, callerId, isUserAdmin)) return res.status(403).json({ error: 'Not authorized' });
   const { role } = req.body || {};
   if (!['lead', 'member', 'viewer'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
@@ -358,6 +414,12 @@ router.post('/:id/tasks', (req, res) => {
   const { id } = req.params;
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(Number(id));
   if (!project) return res.status(404).json({ error: 'Project not found' });
+  
+  // Locked projects (status = 'completed') cannot have tasks added
+  if (project.status === 'completed' && !isSuperAdmin(req.user)) {
+    return res.status(403).json({ error: 'This project is locked and cannot be modified' });
+  }
+  
   if (!canManageProject(project, userId, isUserAdmin) && !isProjectMember(project.id, userId)) {
     return res.status(403).json({ error: 'Not authorized to add tasks to this project' });
   }
@@ -407,7 +469,7 @@ router.get('/:id/stats', (req, res) => {
   `).all(project.id);
   const memberContrib = db.prepare(`
     SELECT u.id, u.name, u.avatar,
-           SUM(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) AS done,
+           SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) AS done,
            COUNT(t.id) AS total
     FROM project_members pm
     JOIN users u ON u.id = pm.user_id

@@ -23,6 +23,7 @@ const STATUS_META: Record<string, { label: string; color: string; icon: any }> =
   on_hold: { label: 'On Hold', color: 'text-amber-600 bg-amber-500/10 border-amber-500/30', icon: Pause },
   completed: { label: 'Completed', color: 'text-blue-600 bg-blue-500/10 border-blue-500/30', icon: CheckCircle2 },
   cancelled: { label: 'Cancelled', color: 'text-bad bg-bad/10 border-bad/30', icon: XCircle },
+  done: { label: 'Done', color: 'text-green-600 bg-green-500/10 border-green-500/30', icon: CheckCircle2 },
 };
 
 export default function ProjectDetailPage() {
@@ -607,12 +608,12 @@ function EditProjectModal({ project, onClose, onSaved }: { project: ProjectDetai
               <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option>
             </select>
           </div>
-          <div>
-            <label className="label">Status</label>
-            <select className="input w-full" value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="active">Active</option><option value="on_hold">On Hold</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option>
-            </select>
-          </div>
+<div>
+  <label className="label">Status</label>
+  <select className="input w-full" value={status} onChange={(e) => setStatus(e.target.value)}>
+    <option value="active">Active</option><option value="on_hold">On Hold</option><option value="completed">Completed</option><option value="done">Done</option><option value="cancelled">Cancelled</option>
+  </select>
+</div>
           <div>
             <label className="label">Color</label>
             <div className="flex items-center gap-2">

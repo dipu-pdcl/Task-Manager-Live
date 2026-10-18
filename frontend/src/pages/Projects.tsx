@@ -19,6 +19,7 @@ const STATUS_META: Record<string, { label: string; color: string; icon: any }> =
   on_hold: { label: 'On Hold', color: 'text-amber-600 bg-amber-500/10 border-amber-500/30', icon: Pause },
   completed: { label: 'Completed', color: 'text-blue-600 bg-blue-500/10 border-blue-500/30', icon: CheckCircle2 },
   cancelled: { label: 'Cancelled', color: 'text-bad bg-bad/10 border-bad/30', icon: XCircle },
+  done: { label: 'Done', color: 'text-green-600 bg-green-500/10 border-green-500/30', icon: CheckCircle2 },
 };
 
 export default function Projects() {
@@ -73,6 +74,7 @@ export default function Projects() {
       active: projects.filter((p) => p.status === 'active').length,
       onHold: projects.filter((p) => p.status === 'on_hold').length,
       completed: projects.filter((p) => p.status === 'completed').length,
+      done: projects.filter((p) => p.status === 'done').length,
       avgProgress: projects.length ? Math.round(projects.reduce((s, p) => s + (p.progress || 0), 0) / projects.length) : 0,
     };
   }, [projects]);
@@ -103,7 +105,7 @@ export default function Projects() {
         </div>
       </div>
 
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
         <StatCard label="Total Projects" value={summary.total} color="#6366f1" icon={<FolderKanban size={18} />} />
         <StatCard label="Active" value={summary.active} color="#22c55e" icon={<TrendingUp size={18} />} />
         <StatCard label="On Hold" value={summary.onHold} color="#f59e0b" icon={<Pause size={18} />} />
@@ -125,6 +127,7 @@ export default function Projects() {
           <option value="active">Active</option>
           <option value="on_hold">On Hold</option>
           <option value="completed">Completed</option>
+          <option value="done">Done</option>
           <option value="cancelled">Cancelled</option>
         </select>
       </div>
