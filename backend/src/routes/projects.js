@@ -470,11 +470,11 @@ router.get('/:id/stats', (req, res) => {
   const memberContrib = db.prepare(`
     SELECT u.id, u.name, u.avatar,
            SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) AS done,
-           COUNT(t.id) AS total
+           COUNT(DISTINCT t.id) AS total
     FROM project_members pm
     JOIN users u ON u.id = pm.user_id
-    LEFT JOIN task_assignees ta ON ta.user_id = u.id
-    LEFT JOIN tasks t ON t.id = ta.task_id AND t.project_id = ? AND t.archived = 0
+    JOIN task_assignees ta ON ta.user_id = u.id
+    JOIN tasks t ON t.id = ta.task_id AND t.project_id = ? AND t.archived = 0
     WHERE pm.project_id = ?
     GROUP BY u.id
     ORDER BY done DESC
