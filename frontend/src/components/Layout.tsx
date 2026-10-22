@@ -46,12 +46,12 @@ const NOTIF_TYPE_CONFIG: Record<string, { icon: any; color: string; bg: string; 
     border: 'border-emerald-500/30',
     label: 'Approval',
   },
-  deadline: {
-    icon: Clock,
-    color: 'text-rose-600 dark:text-rose-400',
-    bg: 'bg-rose-500/10 dark:bg-rose-500/20',
-    border: 'border-rose-500/30',
-    label: 'Deadline',
+  project: {
+    icon: FolderKanban,
+    color: 'text-indigo-600 dark:text-indigo-400',
+    bg: 'bg-indigo-500/10 dark:bg-indigo-500/20',
+    border: 'border-indigo-500/30',
+    label: 'Project',
   },
   system: {
     icon: Cpu,
@@ -66,13 +66,6 @@ const NOTIF_TYPE_CONFIG: Record<string, { icon: any; color: string; bg: string; 
     bg: 'bg-red-500/10 dark:bg-red-500/20',
     border: 'border-red-500/30',
     label: 'Security',
-  },
-  priority_task: {
-    icon: Flame,
-    color: 'text-orange-600 dark:text-orange-400',
-    bg: 'bg-orange-500/10 dark:bg-orange-500/20',
-    border: 'border-orange-500/30',
-    label: 'Priority',
   },
   info: {
     icon: Info,

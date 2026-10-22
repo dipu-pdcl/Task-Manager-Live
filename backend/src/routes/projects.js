@@ -334,7 +334,7 @@ router.post('/:id/members', (req, res) => {
       if (r.changes > 0) {
         added++;
         try {
-          notify(uid, 'project.added', 'Added to project', `You were added to project "${project.name}"`, `/projects/${project.id}`);
+          notify(uid, 'project', 'Added to project', `You were added to project "${project.name}"`, `/projects/${project.id}`);
         } catch {}
       }
     }
@@ -444,7 +444,7 @@ router.post('/:id/tasks', (req, res) => {
           return res.status(400).json({ error: availability.reason });
         }
         ins.run(taskId, uid);
-        try { notify(uid, 'task.assigned', 'Project task assigned', `You were assigned "${title}" in project "${project.name}"`, `/tasks/${taskId}`); } catch {}
+        try { notify(uid, 'task', 'Project task assigned', `You were assigned "${title}" in project "${project.name}"`, `/tasks/${taskId}`); } catch {}
       }
     }
   }
